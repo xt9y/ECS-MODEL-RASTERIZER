@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace RW::Models::Tga {
+namespace Models::Tga {
 
 struct Image {
     int width = 0;
@@ -16,6 +16,6 @@ struct Image {
 
 bool load(const std::string& path, Image *image, std::string *error = nullptr);
 
-} // namespace RW::Models::Tga
+} // namespace Models::Tga
 
 #endif
