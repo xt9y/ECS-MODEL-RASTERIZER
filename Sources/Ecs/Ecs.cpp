@@ -1,6 +1,6 @@
 #include "Ecs/Ecs.hpp"
 
-namespace RW::Ecs {
+namespace Ecs {
 
 void World::ensureCapacity(Entity entity)
 {
@@ -100,4 +100,4 @@ const std::vector<Entity>& World::entities() const
     return entities_;
 }
 
-} // namespace RW::Ecs
+} // namespace Ecs
