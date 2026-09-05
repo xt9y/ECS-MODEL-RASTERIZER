@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace RW::Renderer {
+namespace Renderer {
 
 class Rasterizer {
 public:
@@ -26,6 +26,6 @@ private:
     std::unordered_map<std::uint32_t, unsigned int> textures_;
 };
 
-} // namespace RW::Renderer
+} // namespace Renderer
 
 #endif
