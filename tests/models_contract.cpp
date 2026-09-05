@@ -28,5 +28,12 @@ int main()
     assert(mesh);
     assert(mesh->vertices.size() == 3u);
     assert(mesh->indices.size() == 3u);
+
+    RW::Models::clearCache();
+    error.clear();
+    const auto default_model = RW::Models::load("Assets/default.obj", &error);
+    assert(default_model != RW::Models::INVALID_MODEL);
+    assert(error.empty());
+    assert(RW::Models::partCount(default_model) == 1u);
     return 0;
 }
