@@ -1,0 +1,6 @@
+RW-Engine
+
+C++ RenderWare engine recreation using lwcgl v2.9.3.
+
+build --> c build
+run   --> ./build/rw-engine [model.obj]
