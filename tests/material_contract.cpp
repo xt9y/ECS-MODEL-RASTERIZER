@@ -31,9 +31,9 @@ int main()
                "map_Kd rwengine_material_test.tga\n";
     }
 
-    RW::Models::MaterialMap materials;
+    Models::MaterialMap materials;
     std::string error;
-    assert(RW::Models::loadMaterialLibrary(material_path, &materials, &error));
+    assert(Models::loadMaterialLibrary(material_path, &materials, &error));
     assert(error.empty());
     assert(materials.size() == 1u);
 
@@ -43,6 +43,6 @@ int main()
     assert(found->second.color.y == 0.5f);
     assert(found->second.color.z == 0.75f);
     assert(found->second.opacity == 0.8f);
-    assert(found->second.diffuse_texture != RW::Models::INVALID_TEXTURE);
+    assert(found->second.diffuse_texture != Models::INVALID_TEXTURE);
     return 0;
 }
