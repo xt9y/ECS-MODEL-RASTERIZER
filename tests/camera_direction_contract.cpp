@@ -17,5 +17,15 @@ int main()
     const Ecs::Vec3 up = Camera::flightDirection(0.0f, 30.0f);
     assert(up.y > 0.49f);
     assert(up.z < -0.86f);
+
+    const Ecs::Vec3 right = Camera::strafeDirection(0.0f);
+    assert(right.x > 0.999f);
+    assert(std::fabs(right.y) < 0.001f);
+    assert(std::fabs(right.z) < 0.001f);
+
+    const Ecs::Vec3 turned_right = Camera::strafeDirection(90.0f);
+    assert(std::fabs(turned_right.x) < 0.001f);
+    assert(std::fabs(turned_right.y) < 0.001f);
+    assert(turned_right.z > 0.999f);
     return 0;
 }
