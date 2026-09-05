@@ -41,7 +41,7 @@ int main(int argc, char **argv)
         {0.0f, 0.0f, 0.0f},
         {1.0f, 1.0f, 1.0f},
     });
-    world.addCamera(camera, {60.0f, 0.1f, 2000.0f, true});
+    world.addCamera(camera, {60.0f, 0.1f, true});
 
     const char *model_path = argc > 1 ? argv[1] : "Assets/Sponza/sponza.obj";
     std::string error;
