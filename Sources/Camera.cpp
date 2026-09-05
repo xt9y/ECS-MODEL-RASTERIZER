@@ -7,6 +7,20 @@
 
 namespace Camera {
 
+Ecs::Vec3 flightDirection(float yaw_degrees, float pitch_degrees)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    const float yaw = yaw_degrees * (pi / 180.0f);
+    const float pitch = pitch_degrees * (pi / 180.0f);
+    const float cos_pitch = std::cos(pitch);
+
+    return {
+        std::sin(yaw) * cos_pitch,
+        std::sin(pitch),
+        std::cos(yaw) * cos_pitch,
+    };
+}
+
 void Controller::update(Ecs::World& world, float delta_seconds)
 {
     const Ecs::Entity camera_entity = world.activeCamera();
@@ -27,21 +41,13 @@ void Controller::update(Ecs::World& world, float delta_seconds)
     transform->rotation.x += static_cast<float>(Mouse.getDY()) * mouse_sensitivity;
     transform->rotation.x = std::clamp(transform->rotation.x, -89.0f, 89.0f);
 
+    const Ecs::Vec3 switched_forward = flightDirection(
+        transform->rotation.y,
+        transform->rotation.x
+    );
+
     constexpr float pi = 3.14159265358979323846f;
     const float yaw = transform->rotation.y * (pi / 180.0f);
-    const float pitch = transform->rotation.x * (pi / 180.0f);
-    const float cos_pitch = std::cos(pitch);
-
-    const Ecs::Vec3 forward {
-        std::sin(yaw) * cos_pitch,
-        std::sin(pitch),
-        -std::cos(yaw) * cos_pitch,
-    };
-    const Ecs::Vec3 switched_forward {
-        -forward.x,
-        forward.y,
-        -forward.z,
-    };
     const Ecs::Vec3 right {std::cos(yaw), 0.0f, std::sin(yaw)};
 
     float speed = 30.0f * delta_seconds;

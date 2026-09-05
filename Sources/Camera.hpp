@@ -5,6 +5,8 @@
 
 namespace Camera {
 
+Ecs::Vec3 flightDirection(float yaw_degrees, float pitch_degrees);
+
 class Controller {
 public:
     void update(Ecs::World& world, float delta_seconds);
