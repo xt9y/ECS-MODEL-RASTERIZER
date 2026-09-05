@@ -1,8 +1,8 @@
 #ifndef RW_ENGINE_MODELS_MATERIAL_HPP
 #define RW_ENGINE_MODELS_MATERIAL_HPP
 
-#include "Ecs/Ecs.hpp"
 #include "Models/Texture.hpp"
+#include "Models/Types.hpp"
 
 #include <string>
 #include <unordered_map>
@@ -11,7 +11,7 @@ namespace Models {
 
 struct MaterialData {
     std::string name;
-    Ecs::Vec3 color {1.0f, 1.0f, 1.0f};
+    Vec3 color {1.0f, 1.0f, 1.0f};
     float opacity = 1.0f;
     std::string texture_path;
     TextureHandle diffuse_texture = INVALID_TEXTURE;
