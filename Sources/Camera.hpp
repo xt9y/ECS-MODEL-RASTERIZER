@@ -6,6 +6,7 @@
 namespace Camera {
 
 Ecs::Vec3 flightDirection(float yaw_degrees, float pitch_degrees);
+Ecs::Vec3 strafeDirection(float yaw_degrees);
 
 class Controller {
 public:
