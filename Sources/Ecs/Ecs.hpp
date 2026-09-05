@@ -5,7 +5,7 @@
 #include <optional>
 #include <vector>
 
-namespace RW::Ecs {
+namespace Ecs {
 
 using Entity = std::uint32_t;
 constexpr Entity INVALID_ENTITY = UINT32_MAX;
@@ -99,6 +99,6 @@ private:
     mutable Entity active_camera_cache_ = INVALID_ENTITY;
 };
 
-} // namespace RW::Ecs
+} // namespace Ecs
 
 #endif
