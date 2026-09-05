@@ -6,7 +6,7 @@
 #include <sstream>
 #include <vector>
 
-namespace RW::Models {
+namespace Models {
 namespace {
 
 std::string textureValue(const std::string& value)
@@ -87,4 +87,4 @@ bool loadMaterialLibrary(
     return true;
 }
 
-} // namespace RW::Models
+} // namespace Models
