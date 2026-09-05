@@ -3,7 +3,7 @@
 
 int main()
 {
-    RW::Ecs::World world;
+    Ecs::World world;
     const auto entity = world.createEntity();
     world.addTransform(entity, {{1.0f, 2.0f, 3.0f}, {0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}});
     world.addCamera(entity, {60.0f, 0.1f, 1000.0f, true});
