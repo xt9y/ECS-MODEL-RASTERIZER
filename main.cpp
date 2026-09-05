@@ -65,14 +65,35 @@ int main(int argc, char **argv)
     const char *model_path = argc > 1 ? argv[1] : "Assets/default.obj";
     std::string error;
     const Models::ModelHandle model = Models::load(model_path, &error);
-    if (model == Models::INVALID_MODEL || Models::spawn(world, model, {}, &error).empty()) {
-        std::fprintf(stderr, "RW-Engine: %s\n", error.empty() ? "failed to spawn model" : error.c_str());
+    if (model == Models::INVALID_MODEL) {
+        std::fprintf(stderr, "RW-Engine: %s\n", error.c_str());
         renderer.shutdown();
         Models::clearCache();
         Mouse.destroy();
         Keyboard.destroy();
         Display.destroy();
         return 3;
+    }
+
+    const std::size_t model_parts = Models::partCount(model);
+    if (model_parts == 0u) {
+        std::fprintf(stderr, "RW-Engine: model has no renderable parts\n");
+        renderer.shutdown();
+        Models::clearCache();
+        Mouse.destroy();
+        Keyboard.destroy();
+        Display.destroy();
+        return 3;
+    }
+
+    for (std::size_t i = 0; i < model_parts; ++i) {
+        const Models::ModelPart *part = Models::part(model, i);
+        if (!part) continue;
+
+        const Ecs::Entity entity = world.createEntity();
+        world.addTransform(entity, {});
+        world.addMesh(entity, {part->mesh, part->material});
+        world.addRenderable(entity, {true});
     }
 
     using Clock = std::chrono::steady_clock;
