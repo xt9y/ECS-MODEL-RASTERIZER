@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace RW::Models::Obj {
+namespace Models::Obj {
 namespace {
 
 struct Index {
@@ -242,4 +242,4 @@ bool load(const std::string& path, Document *document, std::string *error)
     return true;
 }
 
-} // namespace RW::Models::Obj
+} // namespace Models::Obj
