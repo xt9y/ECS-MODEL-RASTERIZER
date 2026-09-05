@@ -13,7 +13,8 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    if (argc > 1 && engine.loadModel(argv[1], {}, &error) == RW::Models::INVALID_MODEL) {
+    const char *model_path = argc > 1 ? argv[1] : "Assets/default.obj";
+    if (engine.loadModel(model_path, {}, &error) == RW::Models::INVALID_MODEL) {
         std::fprintf(stderr, "RW-Engine: %s\n", error.c_str());
         return 3;
     }
