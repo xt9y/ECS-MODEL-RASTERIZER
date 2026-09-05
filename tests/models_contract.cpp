@@ -19,12 +19,9 @@ int main()
     assert(error.empty());
     assert(Models::partCount(model) == 1u);
 
-    Ecs::World world;
-    const auto spawned = Models::spawn(world, model, {}, &error);
-    assert(spawned.size() == 1u);
-    const auto *mesh_component = world.getMesh(spawned.front());
-    assert(mesh_component);
-    const auto *mesh = Models::mesh(mesh_component->mesh);
+    const auto *part = Models::part(model, 0u);
+    assert(part);
+    const auto *mesh = Models::mesh(part->mesh);
     assert(mesh);
     assert(mesh->vertices.size() == 3u);
     assert(mesh->indices.size() == 3u);
