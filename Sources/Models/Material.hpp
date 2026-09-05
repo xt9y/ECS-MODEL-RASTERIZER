@@ -7,7 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace RW::Models {
+namespace Models {
 
 struct MaterialData {
     std::string name;
@@ -25,6 +25,6 @@ bool loadMaterialLibrary(
     std::string *error = nullptr
 );
 
-} // namespace RW::Models
+} // namespace Models
 
 #endif
