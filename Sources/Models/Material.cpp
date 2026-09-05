@@ -20,6 +20,33 @@ std::string textureValue(const std::string& value)
     return tokens.empty() ? std::string{} : tokens.back();
 }
 
+bool detectLegacyZeroDIsOpaque(const MaterialMap& materials)
+{
+    std::size_t ordinary_textured = 0u;
+    std::size_t ordinary_zero = 0u;
+    std::size_t alpha_materials = 0u;
+    bool alpha_scalar_convention = true;
+
+    for (const auto& [name, material] : materials) {
+        (void)name;
+
+        if (!material.opacity_texture_path.empty()) {
+            ++alpha_materials;
+            if (material.opacity < 0.999f) alpha_scalar_convention = false;
+            continue;
+        }
+
+        if (material.texture_path.empty()) continue;
+        ++ordinary_textured;
+        if (material.opacity <= 0.0001f) ++ordinary_zero;
+    }
+
+    return ordinary_textured > 0u
+        && ordinary_zero * 100u >= ordinary_textured * 80u
+        && alpha_materials > 0u
+        && alpha_scalar_convention;
+}
+
 } // namespace
 
 bool loadMaterialLibrary(
@@ -81,6 +108,23 @@ bool loadMaterialLibrary(
 
             std::string texture_error;
             current->diffuse_texture = loadTexture(current->texture_path, &texture_error);
+        } else if (key == "map_d") {
+            std::string value;
+            std::getline(stream >> std::ws, value);
+            value = textureValue(value);
+            if (value.empty()) continue;
+
+            current->opacity_texture_path =
+                (material_path.parent_path() / value).lexically_normal().string();
+        }
+    }
+
+    if (detectLegacyZeroDIsOpaque(*materials)) {
+        for (auto& [name, material] : *materials) {
+            (void)name;
+            if (material.opacity <= 0.0001f && material.opacity_texture_path.empty()) {
+                material.opacity = 1.0f;
+            }
         }
     }
 
