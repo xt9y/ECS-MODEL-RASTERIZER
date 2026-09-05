@@ -32,7 +32,7 @@ static void configureLibrary(C_Target *target)
     configurePlatform(target);
 
     c_link_flag(target, "-L/usr/local/lib");
-    c_link_flag(target, "-llwcgl-2.9.3");
+    c_link_flag(target, "-llwcgl");
     c_link_flag(target, "-Wl,-rpath,/usr/local/lib");
 #ifdef __APPLE__
     c_link_flag(target, "-Wl,-install_name,@rpath/libecs-model-rasterizer.dylib");
