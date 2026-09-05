@@ -5,7 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace RW::Models {
+namespace Models {
 namespace {
 
 std::vector<TextureAsset>& assets()
@@ -64,4 +64,4 @@ void clearTextureCache()
     assets().clear();
 }
 
-} // namespace RW::Models
+} // namespace Models
