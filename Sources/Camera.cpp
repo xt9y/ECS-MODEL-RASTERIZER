@@ -39,8 +39,8 @@ void Controller::update(Ecs::World& world, float delta_seconds)
     };
     const Ecs::Vec3 right {std::cos(yaw), 0.0f, std::sin(yaw)};
 
-    float speed = 4.0f * delta_seconds;
-    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) speed *= 3.0f;
+    float speed = 30.0f * delta_seconds;
+    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) speed *= 4.0f;
 
     auto move = [&](const Ecs::Vec3& direction, float scale) {
         transform->position.x += direction.x * scale;
@@ -48,8 +48,8 @@ void Controller::update(Ecs::World& world, float delta_seconds)
         transform->position.z += direction.z * scale;
     };
 
-    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(forward, -speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(forward, speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(forward, speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(forward, -speed);
     if (Keyboard.isKeyDown(Keyboard.KEY_D)) move(right, -speed);
     if (Keyboard.isKeyDown(Keyboard.KEY_A)) move(right, speed);
 
