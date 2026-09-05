@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace RW::Models {
+namespace Models {
 
 using ModelHandle = std::uint32_t;
 using MeshHandle = std::uint32_t;
@@ -60,6 +60,6 @@ const MaterialData *material(MaterialHandle handle);
 std::size_t partCount(ModelHandle model);
 void clearCache();
 
-} // namespace RW::Models
+} // namespace Models
 
 #endif
