@@ -41,7 +41,7 @@ void build(C_Build *b)
     c_sources(app, "Sources/*.cpp");
     c_sources(app, "Sources/*/*.cpp");
 
-    c_flag(app, "-std=c++17");
+    c_flag(app, "-std=c++20");
     configureApp(app);
     c_link_system(app, "stdc++");
     c_default_target(b, app);

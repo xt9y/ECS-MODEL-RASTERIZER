@@ -21,63 +21,38 @@ Entity World::createEntity()
     return entity;
 }
 
-TransformComponent& World::addTransform(Entity entity, const TransformComponent& component)
-{
-    ensureCapacity(entity);
-    transforms_[entity] = component;
-    touch();
-    return *transforms_[entity];
-}
+#define ECS_ADDER(Name, Member, Type) \
+    Type& World::add##Name(Entity entity, const Type& component) { \
+        ensureCapacity(entity); \
+        Member[entity] = component; \
+        touch(); \
+        return *Member[entity]; \
+    }
 
-CameraComponent& World::addCamera(Entity entity, const CameraComponent& component)
-{
-    ensureCapacity(entity);
-    cameras_[entity] = component;
-    touch();
-    return *cameras_[entity];
-}
+#define ECS_GETTER(Name, Member, Type) \
+    Type *World::get##Name(Entity entity) { \
+        if (entity >= Member.size() || !Member[entity]) return nullptr; \
+        return &*Member[entity]; \
+    } \
+    const Type *World::get##Name(Entity entity) const { \
+        if (entity >= Member.size() || !Member[entity]) return nullptr; \
+        return &*Member[entity]; \
+    }
 
-MeshComponent& World::addMesh(Entity entity, const MeshComponent& component)
-{
-    ensureCapacity(entity);
-    meshes_[entity] = component;
-    touch();
-    return *meshes_[entity];
-}
+ECS_ADDER(Transform, transforms_, TransformComponent)
+ECS_ADDER(Camera, cameras_, CameraComponent)
+ECS_ADDER(Mesh, meshes_, MeshComponent)
+ECS_ADDER(Renderable, renderables_, RenderableComponent)
+ECS_ADDER(Light, lights_, LightComponent)
 
-RenderableComponent& World::addRenderable(Entity entity, const RenderableComponent& component)
-{
-    ensureCapacity(entity);
-    renderables_[entity] = component;
-    touch();
-    return *renderables_[entity];
-}
+ECS_GETTER(Transform, transforms_, TransformComponent)
+ECS_GETTER(Camera, cameras_, CameraComponent)
+ECS_GETTER(Mesh, meshes_, MeshComponent)
+ECS_GETTER(Renderable, renderables_, RenderableComponent)
+ECS_GETTER(Light, lights_, LightComponent)
 
-LightComponent& World::addLight(Entity entity, const LightComponent& component)
-{
-    ensureCapacity(entity);
-    lights_[entity] = component;
-    touch();
-    return *lights_[entity];
-}
-
-#define RW_ECS_GETTER(Name, Member, Type) \
-Type *World::get##Name(Entity entity) { \
-    if (entity >= Member.size() || !Member[entity]) return nullptr; \
-    return &*Member[entity]; \
-} \
-const Type *World::get##Name(Entity entity) const { \
-    if (entity >= Member.size() || !Member[entity]) return nullptr; \
-    return &*Member[entity]; \
-}
-
-RW_ECS_GETTER(Transform, transforms_, TransformComponent)
-RW_ECS_GETTER(Camera, cameras_, CameraComponent)
-RW_ECS_GETTER(Mesh, meshes_, MeshComponent)
-RW_ECS_GETTER(Renderable, renderables_, RenderableComponent)
-RW_ECS_GETTER(Light, lights_, LightComponent)
-
-#undef RW_ECS_GETTER
+#undef ECS_ADDER
+#undef ECS_GETTER
 
 Entity World::activeCamera() const
 {
