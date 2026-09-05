@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace RW::Models {
+namespace Models {
 namespace {
 
 struct Part {
@@ -119,4 +119,4 @@ void clearCache()
     clearTextureCache();
 }
 
-} // namespace RW::Models
+} // namespace Models
