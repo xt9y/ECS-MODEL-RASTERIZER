@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace RW::Models::Tga {
+namespace Models::Tga {
 namespace {
 
 bool fail(std::string *error, const std::string& message)
@@ -156,4 +156,4 @@ bool load(const std::string& path, Image *image, std::string *error)
     return true;
 }
 
-} // namespace RW::Models::Tga
+} // namespace Models::Tga
