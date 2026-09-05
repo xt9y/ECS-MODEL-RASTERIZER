@@ -23,11 +23,11 @@ int main()
     }
 
     std::string error;
-    const auto handle = RW::Models::loadTexture(path, &error);
-    assert(handle != RW::Models::INVALID_TEXTURE);
+    const auto handle = Models::loadTexture(path, &error);
+    assert(handle != Models::INVALID_TEXTURE);
     assert(error.empty());
 
-    const auto *asset = RW::Models::texture(handle);
+    const auto *asset = Models::texture(handle);
     assert(asset);
     assert(asset->image.width == 1);
     assert(asset->image.height == 1);
