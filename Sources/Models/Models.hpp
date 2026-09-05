@@ -1,8 +1,8 @@
 #ifndef RW_ENGINE_MODELS_HPP
 #define RW_ENGINE_MODELS_HPP
 
-#include "Ecs/Ecs.hpp"
 #include "Models/Material.hpp"
+#include "Models/Types.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,14 +20,14 @@ constexpr MeshHandle INVALID_MESH = UINT32_MAX;
 constexpr MaterialHandle INVALID_MATERIAL = UINT32_MAX;
 
 struct Vertex {
-    Ecs::Vec3 position;
-    Ecs::Vec3 normal {0.0f, 0.0f, 1.0f};
-    Ecs::Vec2 uv;
+    Vec3 position;
+    Vec3 normal {0.0f, 0.0f, 1.0f};
+    Vec2 uv;
 };
 
 struct Bounds {
-    Ecs::Vec3 minimum;
-    Ecs::Vec3 maximum;
+    Vec3 minimum;
+    Vec3 maximum;
 };
 
 struct MeshData {
@@ -36,25 +36,13 @@ struct MeshData {
     Bounds bounds;
 };
 
-struct SpawnOptions {
-    Ecs::TransformComponent transform {};
-    bool visible = true;
+struct ModelPart {
+    MeshHandle mesh = INVALID_MESH;
+    MaterialHandle material = INVALID_MATERIAL;
 };
 
 ModelHandle load(const std::string& path, std::string *error = nullptr);
-std::vector<Ecs::Entity> spawn(
-    Ecs::World& world,
-    ModelHandle model,
-    const SpawnOptions& options = {},
-    std::string *error = nullptr
-);
-std::vector<Ecs::Entity> loadInto(
-    Ecs::World& world,
-    const std::string& path,
-    const SpawnOptions& options = {},
-    std::string *error = nullptr
-);
-
+const ModelPart *part(ModelHandle model, std::size_t index);
 const MeshData *mesh(MeshHandle handle);
 const MaterialData *material(MaterialHandle handle);
 std::size_t partCount(ModelHandle model);
