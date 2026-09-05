@@ -3,9 +3,9 @@
 
 #include "Ecs/Ecs.hpp"
 
-namespace RW {
+namespace Camera {
 
-class CameraController {
+class Controller {
 public:
     void update(Ecs::World& world, float delta_seconds);
 
@@ -13,6 +13,6 @@ private:
     bool mouse_initialized_ = false;
 };
 
-} // namespace RW
+} // namespace Camera
 
 #endif
