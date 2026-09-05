@@ -17,7 +17,7 @@ int main(int argc, char **argv)
 
     lwcglInstallFastRuntime();
 
-    DisplayMode mode(initial_width, initial_height);
+    DisplayMode mode = DisplayMode(initial_width, initial_height);
     if (Display.setDisplayMode(&mode) != 0 || Display.create() != 0) {
         const char *message = lwcglGetLastError();
         std::fprintf(stderr, "RW-Engine: %s\n", message ? message : "failed to create display");
