@@ -10,12 +10,14 @@ static void configurePlatform(C_Target *target)
     c_framework(target, "Cocoa");
     c_framework(target, "IOKit");
     c_framework(target, "CoreVideo");
+    c_link_system(target, "c++");
 #else
     c_link_system(target, "GL");
     c_link_system(target, "GLU");
     c_link_system(target, "m");
     c_link_system(target, "dl");
     c_link_system(target, "pthread");
+    c_link_system(target, "stdc++");
 #endif
     c_link_system(target, "glfw");
 }
@@ -48,6 +50,5 @@ void build(C_Build *b)
 
     c_flag(library, "-std=c++20");
     configureLibrary(library);
-    c_link_system(library, "stdc++");
     c_default_target(b, library);
 }
