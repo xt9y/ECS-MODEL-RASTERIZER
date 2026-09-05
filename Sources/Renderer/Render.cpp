@@ -6,6 +6,7 @@
 #include <lwcgl/lwcgl.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace Renderer {
 namespace {
@@ -31,6 +32,23 @@ void applyTransform(const Ecs::TransformComponent& transform)
     glRotatef(transform.rotation.y, 0.0f, 1.0f, 0.0f);
     glRotatef(transform.rotation.z, 0.0f, 0.0f, 1.0f);
     glScalef(transform.scale.x, transform.scale.y, transform.scale.z);
+}
+
+void applyInfinitePerspective(float fov_degrees, float aspect, float near_plane)
+{
+    constexpr float pi = 3.14159265358979323846f;
+    const float safe_fov = std::clamp(fov_degrees, 1.0f, 179.0f);
+    const float safe_aspect = aspect > 1.0e-6f ? aspect : 1.0f;
+    const float safe_near = std::max(near_plane, 1.0e-4f);
+    const float focal = 1.0f / std::tan(safe_fov * (pi / 360.0f));
+
+    const GLfloat projection[16] = {
+        focal / safe_aspect, 0.0f, 0.0f, 0.0f,
+        0.0f, focal, 0.0f, 0.0f,
+        0.0f, 0.0f, -1.0f, -1.0f,
+        0.0f, 0.0f, -2.0f * safe_near, 0.0f,
+    };
+    glLoadMatrixf(projection);
 }
 
 } // namespace
@@ -129,13 +147,11 @@ void Rasterizer::render(const Ecs::World& world)
         : world.getCamera(camera_entity);
 
     glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    const double aspect = static_cast<double>(width_) / static_cast<double>(height_);
-    gluPerspective(
-        camera ? camera->fov_degrees : 60.0,
+    const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
+    applyInfinitePerspective(
+        camera ? camera->fov_degrees : 60.0f,
         aspect,
-        camera ? camera->near_plane : 0.1,
-        camera ? camera->far_plane : 1000.0
+        camera ? camera->near_plane : 0.1f
     );
 
     glMatrixMode(GL_MODELVIEW);
