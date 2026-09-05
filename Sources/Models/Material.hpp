@@ -14,6 +14,7 @@ struct MaterialData {
     Vec3 color {1.0f, 1.0f, 1.0f};
     float opacity = 1.0f;
     std::string texture_path;
+    std::string opacity_texture_path;
     TextureHandle diffuse_texture = INVALID_TEXTURE;
 };
 
