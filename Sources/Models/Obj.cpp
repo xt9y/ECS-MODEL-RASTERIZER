@@ -22,12 +22,12 @@ struct Index {
     int normal = -1;
 };
 
-Ecs::Vec3 subtract(const Ecs::Vec3& a, const Ecs::Vec3& b)
+Vec3 subtract(const Vec3& a, const Vec3& b)
 {
     return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
 
-Ecs::Vec3 cross(const Ecs::Vec3& a, const Ecs::Vec3& b)
+Vec3 cross(const Vec3& a, const Vec3& b)
 {
     return {
         a.y * b.z - a.z * b.y,
@@ -36,7 +36,7 @@ Ecs::Vec3 cross(const Ecs::Vec3& a, const Ecs::Vec3& b)
     };
 }
 
-Ecs::Vec3 normalize(const Ecs::Vec3& value)
+Vec3 normalize(const Vec3& value)
 {
     const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
     if (length <= 1.0e-8f) return {0.0f, 0.0f, 1.0f};
@@ -131,9 +131,9 @@ bool load(const std::string& path, Document *document, std::string *error)
 
     const std::filesystem::path object_path(path);
     MaterialMap materials;
-    std::vector<Ecs::Vec3> positions;
-    std::vector<Ecs::Vec3> normals;
-    std::vector<Ecs::Vec2> uvs;
+    std::vector<Vec3> positions;
+    std::vector<Vec3> normals;
+    std::vector<Vec2> uvs;
     std::vector<Builder> builders(1);
     Builder *builder = &builders.back();
 
@@ -157,21 +157,21 @@ bool load(const std::string& path, Document *document, std::string *error)
         if (key.empty() || key[0] == '#') continue;
 
         if (key == "v") {
-            Ecs::Vec3 value;
+            Vec3 value;
             if (!(stream >> value.x >> value.y >> value.z)) {
                 if (error) *error = "invalid OBJ vertex at line " + std::to_string(line_number);
                 return false;
             }
             positions.push_back(value);
         } else if (key == "vn") {
-            Ecs::Vec3 value;
+            Vec3 value;
             if (!(stream >> value.x >> value.y >> value.z)) {
                 if (error) *error = "invalid OBJ normal at line " + std::to_string(line_number);
                 return false;
             }
             normals.push_back(normalize(value));
         } else if (key == "vt") {
-            Ecs::Vec2 value;
+            Vec2 value;
             if (!(stream >> value.x >> value.y)) {
                 if (error) *error = "invalid OBJ texcoord at line " + std::to_string(line_number);
                 return false;
@@ -209,7 +209,7 @@ bool load(const std::string& path, Document *document, std::string *error)
 
             for (std::size_t triangle = 1; triangle + 1 < polygon.size(); ++triangle) {
                 const std::array<Index, 3> corners {polygon[0], polygon[triangle], polygon[triangle + 1]};
-                const Ecs::Vec3 face_normal = normalize(cross(
+                const Vec3 face_normal = normalize(cross(
                     subtract(positions[corners[1].position], positions[corners[0].position]),
                     subtract(positions[corners[2].position], positions[corners[0].position])
                 ));
@@ -218,7 +218,7 @@ bool load(const std::string& path, Document *document, std::string *error)
                     Vertex vertex;
                     vertex.position = positions[index.position];
                     vertex.normal = index.normal >= 0 ? normals[index.normal] : face_normal;
-                    vertex.uv = index.uv >= 0 ? uvs[index.uv] : Ecs::Vec2{};
+                    vertex.uv = index.uv >= 0 ? uvs[index.uv] : Vec2{};
                     builder->mesh.indices.push_back(static_cast<std::uint32_t>(builder->mesh.vertices.size()));
                     builder->mesh.vertices.push_back(vertex);
                 }
