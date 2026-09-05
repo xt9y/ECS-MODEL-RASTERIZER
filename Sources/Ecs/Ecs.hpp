@@ -31,7 +31,6 @@ struct TransformComponent {
 struct CameraComponent {
     float fov_degrees = 60.0f;
     float near_plane = 0.1f;
-    float far_plane = 1000.0f;
     bool active = true;
 };
 
