@@ -79,8 +79,7 @@ unsigned int Rasterizer::textureFor(std::uint32_t handle)
         return 0u;
     }
 
-    GLuint texture_id = 0u;
-    glGenTextures(1, &texture_id);
+    const GLuint texture_id = glGenTextures();
     if (texture_id == 0u) return 0u;
 
     glBindTexture(GL_TEXTURE_2D, texture_id);
@@ -196,7 +195,7 @@ void Rasterizer::shutdown()
     for (const auto& [handle, texture_id] : textures_) {
         (void)handle;
         const GLuint id = static_cast<GLuint>(texture_id);
-        if (id != 0u) glDeleteTextures(1, &id);
+        if (id != 0u) glDeleteTextures(id);
     }
     textures_.clear();
     initialized_ = false;
