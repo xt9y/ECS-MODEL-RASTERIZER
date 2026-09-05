@@ -7,7 +7,7 @@
 
 #include <algorithm>
 
-namespace RW::Renderer {
+namespace Renderer {
 namespace {
 
 void applyCamera(const Ecs::World& world)
@@ -201,4 +201,4 @@ void Rasterizer::shutdown()
     initialized_ = false;
 }
 
-} // namespace RW::Renderer
+} // namespace Renderer
