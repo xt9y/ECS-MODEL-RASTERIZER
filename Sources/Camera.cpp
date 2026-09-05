@@ -54,8 +54,8 @@ void Controller::update(Ecs::World& world, float delta_seconds)
     );
     const Ecs::Vec3 right = strafeDirection(transform->rotation.y);
 
-    float speed = 30.0f * delta_seconds;
-    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) speed *= 4.0f;
+    float speed = 100.0f * delta_seconds;
+    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) speed *= 10.0f;
 
     auto move = [&](const Ecs::Vec3& direction, float scale) {
         transform->position.x += direction.x * scale;
