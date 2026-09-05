@@ -9,14 +9,9 @@
 namespace Models {
 namespace {
 
-struct Part {
-    MeshHandle mesh = INVALID_MESH;
-    MaterialHandle material = INVALID_MATERIAL;
-};
-
 struct Model {
     std::string path;
-    std::vector<Part> parts;
+    std::vector<ModelPart> parts;
 };
 
 std::vector<Model>& models() { static std::vector<Model> values; return values; }
@@ -52,12 +47,12 @@ ModelHandle load(const std::string& path, std::string *error)
     model.path = key;
     model.parts.reserve(document.parts.size());
 
-    for (Obj::Part& part : document.parts) {
+    for (Obj::Part& source_part : document.parts) {
         const MeshHandle mesh_handle = static_cast<MeshHandle>(meshes().size());
-        meshes().push_back(std::move(part.mesh));
+        meshes().push_back(std::move(source_part.mesh));
 
         const MaterialHandle material_handle = static_cast<MaterialHandle>(materials().size());
-        materials().push_back(std::move(part.material));
+        materials().push_back(std::move(source_part.material));
         model.parts.push_back({mesh_handle, material_handle});
     }
 
@@ -67,32 +62,11 @@ ModelHandle load(const std::string& path, std::string *error)
     return handle;
 }
 
-std::vector<Ecs::Entity> spawn(Ecs::World& world, ModelHandle handle, const SpawnOptions& options, std::string *error)
+const ModelPart *part(ModelHandle handle, std::size_t index)
 {
-    if (error) error->clear();
-    if (handle >= models().size()) {
-        if (error) *error = "invalid model handle";
-        return {};
-    }
-
+    if (handle >= models().size()) return nullptr;
     const Model& model = models()[handle];
-    std::vector<Ecs::Entity> entities;
-    entities.reserve(model.parts.size());
-
-    for (const Part& part : model.parts) {
-        const Ecs::Entity entity = world.createEntity();
-        world.addTransform(entity, options.transform);
-        world.addMesh(entity, {part.mesh, part.material});
-        world.addRenderable(entity, {options.visible});
-        entities.push_back(entity);
-    }
-    return entities;
-}
-
-std::vector<Ecs::Entity> loadInto(Ecs::World& world, const std::string& path, const SpawnOptions& options, std::string *error)
-{
-    const ModelHandle handle = load(path, error);
-    return handle == INVALID_MODEL ? std::vector<Ecs::Entity>{} : spawn(world, handle, options, error);
+    return index < model.parts.size() ? &model.parts[index] : nullptr;
 }
 
 const MeshData *mesh(MeshHandle handle)
