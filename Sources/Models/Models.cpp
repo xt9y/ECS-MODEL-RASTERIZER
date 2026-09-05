@@ -1,5 +1,6 @@
 #include "Models/Models.hpp"
 #include "Models/Obj.hpp"
+#include "Models/Texture.hpp"
 
 #include <filesystem>
 #include <unordered_map>
@@ -115,6 +116,7 @@ void clearCache()
     models().clear();
     meshes().clear();
     materials().clear();
+    clearTextureCache();
 }
 
 } // namespace RW::Models

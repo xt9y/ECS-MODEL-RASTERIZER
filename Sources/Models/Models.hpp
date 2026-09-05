@@ -2,6 +2,7 @@
 #define RW_ENGINE_MODELS_HPP
 
 #include "Ecs/Ecs.hpp"
+#include "Models/Material.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -33,13 +34,6 @@ struct MeshData {
     std::vector<Vertex> vertices;
     std::vector<std::uint32_t> indices;
     Bounds bounds;
-};
-
-struct MaterialData {
-    std::string name;
-    Ecs::Vec3 color {1.0f, 1.0f, 1.0f};
-    float opacity = 1.0f;
-    std::string texture_path;
 };
 
 struct SpawnOptions {

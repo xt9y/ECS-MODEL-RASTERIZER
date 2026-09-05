@@ -1,6 +1,7 @@
 #include "Renderer/Render.hpp"
 
 #include "Models/Models.hpp"
+#include "Models/Texture.hpp"
 
 #include <lwcgl/lwcgl.h>
 
@@ -66,6 +67,44 @@ void Rasterizer::resize(int width, int height)
     glViewport(0, 0, width_, height_);
 }
 
+unsigned int Rasterizer::textureFor(std::uint32_t handle)
+{
+    if (handle == Models::INVALID_TEXTURE) return 0u;
+
+    const auto found = textures_.find(handle);
+    if (found != textures_.end()) return found->second;
+
+    const Models::TextureAsset *asset = Models::texture(handle);
+    if (!asset || asset->image.width <= 0 || asset->image.height <= 0 || asset->image.rgba.empty()) {
+        return 0u;
+    }
+
+    GLuint texture_id = 0u;
+    glGenTextures(1, &texture_id);
+    if (texture_id == 0u) return 0u;
+
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        GL_RGBA,
+        asset->image.width,
+        asset->image.height,
+        0,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        asset->image.rgba.data()
+    );
+
+    textures_.emplace(handle, texture_id);
+    return texture_id;
+}
+
 void Rasterizer::render(const Ecs::World& world)
 {
     if (!initialized_) return;
@@ -105,12 +144,27 @@ void Rasterizer::render(const Ecs::World& world)
 
         const Models::MaterialData *material = Models::material(mesh_component->material);
         const float opacity = material ? std::clamp(material->opacity, 0.0f, 1.0f) : 1.0f;
+        const unsigned int texture_id = material ? textureFor(material->diffuse_texture) : 0u;
+        const Models::TextureAsset *texture_asset = material
+            && material->diffuse_texture != Models::INVALID_TEXTURE
+            ? Models::texture(material->diffuse_texture)
+            : nullptr;
+        const bool transparent = opacity < 1.0f
+            || (texture_asset && texture_asset->image.meaningful_alpha);
 
-        if (opacity < 1.0f) {
+        if (transparent) {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         } else {
             glDisable(GL_BLEND);
+        }
+
+        if (texture_id != 0u) {
+            glEnable(GL_TEXTURE_2D);
+            glBindTexture(GL_TEXTURE_2D, texture_id);
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+        } else {
+            glDisable(GL_TEXTURE_2D);
         }
 
         if (material) {
@@ -126,17 +180,25 @@ void Rasterizer::render(const Ecs::World& world)
             if (index >= mesh->vertices.size()) continue;
             const Models::Vertex& vertex = mesh->vertices[index];
             glNormal3f(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+            if (texture_id != 0u) glTexCoord2f(vertex.uv.x, 1.0f - vertex.uv.y);
             glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
         }
         glEnd();
         glPopMatrix();
     }
 
+    glDisable(GL_TEXTURE_2D);
     glDisable(GL_BLEND);
 }
 
 void Rasterizer::shutdown()
 {
+    for (const auto& [handle, texture_id] : textures_) {
+        (void)handle;
+        const GLuint id = static_cast<GLuint>(texture_id);
+        if (id != 0u) glDeleteTextures(1, &id);
+    }
+    textures_.clear();
     initialized_ = false;
 }
 

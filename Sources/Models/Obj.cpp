@@ -1,5 +1,7 @@
 #include "Models/Obj.hpp"
 
+#include "Models/Material.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -8,7 +10,8 @@
 #include <fstream>
 #include <limits>
 #include <sstream>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace RW::Models::Obj {
 namespace {
@@ -44,11 +47,11 @@ int resolveIndex(int index, std::size_t count)
 {
     if (index > 0) {
         const int resolved = index - 1;
-        return resolved < static_cast<int>(count) ? resolved : -1;
+        return resolved >= 0 && resolved < static_cast<int>(count) ? resolved : -1;
     }
     if (index < 0) {
         const int resolved = static_cast<int>(count) + index;
-        return resolved >= 0 ? resolved : -1;
+        return resolved >= 0 && resolved < static_cast<int>(count) ? resolved : -1;
     }
     return -1;
 }
@@ -104,45 +107,6 @@ Bounds calculateBounds(const std::vector<Vertex>& vertices)
     return bounds;
 }
 
-std::unordered_map<std::string, MaterialData> loadMaterials(const std::filesystem::path& path)
-{
-    std::unordered_map<std::string, MaterialData> result;
-    std::ifstream input(path);
-    if (!input) return result;
-
-    MaterialData *current = nullptr;
-    std::string line;
-    while (std::getline(input, line)) {
-        std::istringstream stream(line);
-        std::string key;
-        stream >> key;
-        if (key.empty() || key[0] == '#') continue;
-
-        if (key == "newmtl") {
-            std::string name;
-            stream >> name;
-            current = &result[name];
-            current->name = name;
-        } else if (current && key == "Kd") {
-            stream >> current->color.x >> current->color.y >> current->color.z;
-        } else if (current && key == "d") {
-            stream >> current->opacity;
-            current->opacity = std::clamp(current->opacity, 0.0f, 1.0f);
-        } else if (current && key == "Tr") {
-            float transparency = 0.0f;
-            stream >> transparency;
-            current->opacity = 1.0f - std::clamp(transparency, 0.0f, 1.0f);
-        } else if (current && key == "map_Kd") {
-            std::string texture;
-            std::getline(stream >> std::ws, texture);
-            if (!texture.empty()) {
-                current->texture_path = (path.parent_path() / texture).lexically_normal().string();
-            }
-        }
-    }
-    return result;
-}
-
 struct Builder {
     std::string material_name;
     MeshData mesh;
@@ -166,7 +130,7 @@ bool load(const std::string& path, Document *document, std::string *error)
     }
 
     const std::filesystem::path object_path(path);
-    std::unordered_map<std::string, MaterialData> materials;
+    MaterialMap materials;
     std::vector<Ecs::Vec3> positions;
     std::vector<Ecs::Vec3> normals;
     std::vector<Ecs::Vec2> uvs;
@@ -216,8 +180,13 @@ bool load(const std::string& path, Document *document, std::string *error)
         } else if (key == "mtllib") {
             std::string library;
             std::getline(stream >> std::ws, library);
-            const auto loaded = loadMaterials((object_path.parent_path() / library).lexically_normal());
-            materials.insert(loaded.begin(), loaded.end());
+            MaterialMap loaded;
+            std::string ignored_error;
+            const std::filesystem::path material_path =
+                (object_path.parent_path() / library).lexically_normal();
+            if (loadMaterialLibrary(material_path.string(), &loaded, &ignored_error)) {
+                materials.insert(loaded.begin(), loaded.end());
+            }
         } else if (key == "usemtl") {
             std::string name;
             std::getline(stream >> std::ws, name);
