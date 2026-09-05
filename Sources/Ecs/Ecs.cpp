@@ -2,7 +2,7 @@
 
 namespace Ecs {
 
-void World::ensureCapacity(Entity entity)
+void World::ensureCapacity(const Entity entity)
 {
     const std::size_t size = static_cast<std::size_t>(entity) + 1u;
     if (transforms_.size() < size) transforms_.resize(size);
@@ -59,9 +59,10 @@ Entity World::activeCamera() const
     if (active_camera_revision_ == change_revision_) return active_camera_cache_;
 
     active_camera_cache_ = INVALID_ENTITY;
-    for (const Entity entity : entities_) {
-        const CameraComponent *camera = getCamera(entity);
-        if (camera && camera->active && getTransform(entity)) {
+    for (const Entity entity : entities_)
+    {
+        if (getCamera(entity) && getCamera(entity)->active && getTransform(entity))
+        {
             active_camera_cache_ = entity;
             break;
         }
