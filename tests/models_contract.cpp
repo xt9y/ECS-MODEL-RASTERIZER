@@ -14,26 +14,26 @@ int main()
     }
 
     std::string error;
-    const auto model = RW::Models::load(path, &error);
-    assert(model != RW::Models::INVALID_MODEL);
+    const auto model = Models::load(path, &error);
+    assert(model != Models::INVALID_MODEL);
     assert(error.empty());
-    assert(RW::Models::partCount(model) == 1u);
+    assert(Models::partCount(model) == 1u);
 
-    RW::Ecs::World world;
-    const auto spawned = RW::Models::spawn(world, model, {}, &error);
+    Ecs::World world;
+    const auto spawned = Models::spawn(world, model, {}, &error);
     assert(spawned.size() == 1u);
     const auto *mesh_component = world.getMesh(spawned.front());
     assert(mesh_component);
-    const auto *mesh = RW::Models::mesh(mesh_component->mesh);
+    const auto *mesh = Models::mesh(mesh_component->mesh);
     assert(mesh);
     assert(mesh->vertices.size() == 3u);
     assert(mesh->indices.size() == 3u);
 
-    RW::Models::clearCache();
+    Models::clearCache();
     error.clear();
-    const auto default_model = RW::Models::load("Assets/default.obj", &error);
-    assert(default_model != RW::Models::INVALID_MODEL);
+    const auto default_model = Models::load("Assets/default.obj", &error);
+    assert(default_model != Models::INVALID_MODEL);
     assert(error.empty());
-    assert(RW::Models::partCount(default_model) == 1u);
+    assert(Models::partCount(default_model) == 1u);
     return 0;
 }
