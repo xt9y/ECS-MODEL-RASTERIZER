@@ -17,7 +17,7 @@ Ecs::Vec3 flightDirection(float yaw_degrees, float pitch_degrees)
     return {
         std::sin(yaw) * cos_pitch,
         std::sin(pitch),
-        std::cos(yaw) * cos_pitch,
+        -std::cos(yaw) * cos_pitch,
     };
 }
 
