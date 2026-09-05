@@ -5,9 +5,9 @@
 #include <algorithm>
 #include <cmath>
 
-namespace RW {
+namespace Camera {
 
-void CameraController::update(Ecs::World& world, float delta_seconds)
+void Controller::update(Ecs::World& world, float delta_seconds)
 {
     const Ecs::Entity camera_entity = world.activeCamera();
     if (camera_entity == Ecs::INVALID_ENTITY) return;
@@ -58,4 +58,4 @@ void CameraController::update(Ecs::World& world, float delta_seconds)
     world.markChanged();
 }
 
-} // namespace RW
+} // namespace Camera
