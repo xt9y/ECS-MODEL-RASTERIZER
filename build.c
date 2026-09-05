@@ -40,7 +40,6 @@ void build(C_Build *b)
     c_sources(app, "main.cpp");
     c_sources(app, "Sources/*.cpp");
     c_sources(app, "Sources/*/*.cpp");
-    c_sources(app, "Sources/*/*/*.cpp");
 
     c_flag(app, "-std=c++17");
     configureApp(app);
