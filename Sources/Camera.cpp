@@ -37,6 +37,11 @@ void Controller::update(Ecs::World& world, float delta_seconds)
         std::sin(pitch),
         -std::cos(yaw) * cos_pitch,
     };
+    const Ecs::Vec3 switched_forward {
+        -forward.x,
+        forward.y,
+        -forward.z,
+    };
     const Ecs::Vec3 right {std::cos(yaw), 0.0f, std::sin(yaw)};
 
     float speed = 30.0f * delta_seconds;
@@ -48,8 +53,8 @@ void Controller::update(Ecs::World& world, float delta_seconds)
         transform->position.z += direction.z * scale;
     };
 
-    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(forward, -speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(forward, speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(switched_forward, speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(switched_forward, -speed);
     if (Keyboard.isKeyDown(Keyboard.KEY_D)) move(right, -speed);
     if (Keyboard.isKeyDown(Keyboard.KEY_A)) move(right, speed);
 
