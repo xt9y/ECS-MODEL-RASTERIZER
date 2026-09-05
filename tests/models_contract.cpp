@@ -28,9 +28,9 @@ int main()
 
     Models::clearCache();
     error.clear();
-    const auto default_model = Models::load("Assets/default.obj", &error);
+    const auto default_model = Models::load("Assets/Sponza/sponza.obj", &error);
     assert(default_model != Models::INVALID_MODEL);
     assert(error.empty());
-    assert(Models::partCount(default_model) == 1u);
+    assert(Models::partCount(default_model) > 0u);
     return 0;
 }

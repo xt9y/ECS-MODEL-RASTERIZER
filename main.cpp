@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     });
     world.addCamera(camera, {60.0f, 0.1f, 2000.0f, true});
 
-    const char *model_path = argc > 1 ? argv[1] : "Assets/default.obj";
+    const char *model_path = argc > 1 ? argv[1] : "Assets/Sponza/sponza.obj";
     std::string error;
     const Models::ModelHandle model = Models::load(model_path, &error);
     if (model == Models::INVALID_MODEL) {
