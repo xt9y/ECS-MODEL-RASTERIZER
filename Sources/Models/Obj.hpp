@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace RW::Models::Obj {
+namespace Models::Obj {
 
 struct Part {
     MeshData mesh;
@@ -19,6 +19,6 @@ struct Document {
 
 bool load(const std::string& path, Document *document, std::string *error = nullptr);
 
-} // namespace RW::Models::Obj
+} // namespace Models::Obj
 
 #endif
