@@ -50,9 +50,22 @@ bool Rasterizer::init()
     glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
     glShadeModel(GL_SMOOTH);
 
-    const GLfloat ambient[] = {0.22f, 0.22f, 0.22f, 1.0f};
-    const GLfloat diffuse[] = {0.90f, 0.90f, 0.90f, 1.0f};
-    glLightfv(GL_LIGHT0, GL_AMBIENT, ambient);
+    const GLfloat scene_ambient[] = {
+        LightingDefaults::scene_ambient,
+        LightingDefaults::scene_ambient,
+        LightingDefaults::scene_ambient,
+        1.0f,
+    };
+    const GLfloat no_light_ambient[] = {0.0f, 0.0f, 0.0f, 1.0f};
+    const GLfloat diffuse[] = {
+        LightingDefaults::direct_diffuse,
+        LightingDefaults::direct_diffuse,
+        LightingDefaults::direct_diffuse,
+        1.0f,
+    };
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, scene_ambient);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, no_light_ambient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
 
     glClearColor(0.035f, 0.035f, 0.045f, 1.0f);
