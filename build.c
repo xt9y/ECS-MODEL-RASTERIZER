@@ -23,7 +23,7 @@ static void configurePlatform(C_Target *target)
 #endif
 }
 
-static void configureApp(C_Target *target)
+static void configureLibrary(C_Target *target)
 {
     c_warnings_strict(target);
     c_include(target, ".");
@@ -35,14 +35,13 @@ static void configureApp(C_Target *target)
 
 void build(C_Build *b)
 {
-    C_Target *app = c_executable(b, "rw-engine");
+    C_Target *library = c_shared_library(b, "ecs-model-rasterizer");
 
-    c_sources(app, "main.cpp");
-    c_sources(app, "Sources/*.cpp");
-    c_sources(app, "Sources/*/*.cpp");
+    c_sources(library, "Sources/*.cpp");
+    c_sources(library, "Sources/*/*.cpp");
 
-    c_flag(app, "-std=c++20");
-    configureApp(app);
-    c_link_system(app, "stdc++");
-    c_default_target(b, app);
+    c_flag(library, "-std=c++20");
+    configureLibrary(library);
+    c_link_system(library, "stdc++");
+    c_default_target(b, library);
 }
