@@ -17,39 +17,20 @@ int main(int argc, char **argv)
 
     lwcglInstallFastRuntime();
 
-    DisplayMode mode = DisplayMode(initial_width, initial_height);
-    if (Display.setDisplayMode(&mode) != 0 || Display.create() != 0) {
-        const char *message = lwcglGetLastError();
-        std::fprintf(stderr, "RW-Engine: %s\n", message ? message : "failed to create display");
-        if (Display.isCreated()) Display.destroy();
-        return 2;
-    }
+    Display.setDisplayMode(new DisplayMode(initial_width, initial_height));
+    Display.create();
 
-    Display.setTitle("RW-Engine");
-    Display.setResizable(LWCGL_TRUE);
-    Display.setVSyncEnabled(LWCGL_TRUE);
+    Display.setTitle("Test");
 
-    if (Keyboard.create() != 0 || Mouse.create() != 0) {
-        const char *message = lwcglGetLastError();
-        std::fprintf(stderr, "RW-Engine: %s\n", message ? message : "failed to initialize input");
-        if (Mouse.isCreated()) Mouse.destroy();
-        if (Keyboard.isCreated()) Keyboard.destroy();
-        Display.destroy();
-        return 2;
-    }
+    Keyboard.create();
+    Mouse.create();
 
     Renderer::Rasterizer renderer;
-    if (!renderer.init()) {
-        std::fprintf(stderr, "RW-Engine: failed to initialize rasterizer\n");
-        Mouse.destroy();
-        Keyboard.destroy();
-        Display.destroy();
-        return 2;
-    }
+    renderer.init();
 
-    int framebuffer_width = std::max(Display.getWidth(), 1);
-    int framebuffer_height = std::max(Display.getHeight(), 1);
-    renderer.resize(framebuffer_width, framebuffer_height);
+    renderer.resize(
+        std::max(Display.getWidth(), 1),
+        std::max(Display.getHeight(), 1));
 
     Ecs::World world;
     Camera::Controller camera_controller;
@@ -111,9 +92,7 @@ int main(int argc, char **argv)
 
         const int width = std::max(Display.getWidth(), 1);
         const int height = std::max(Display.getHeight(), 1);
-        if (width != framebuffer_width || height != framebuffer_height) {
-            framebuffer_width = width;
-            framebuffer_height = height;
+        if (width != std::max(Display.getWidth(), 1) || height != std::max(Display.getHeight(), 1)) {
             renderer.resize(width, height);
         }
 
