@@ -23,8 +23,8 @@ void Controller::update(Ecs::World& world, float delta_seconds)
     }
 
     constexpr float mouse_sensitivity = 0.12f;
-    transform->rotation.y += static_cast<float>(Mouse.getDX()) * mouse_sensitivity;
-    transform->rotation.x -= static_cast<float>(Mouse.getDY()) * mouse_sensitivity;
+    transform->rotation.y -= static_cast<float>(Mouse.getDX()) * mouse_sensitivity;
+    transform->rotation.x += static_cast<float>(Mouse.getDY()) * mouse_sensitivity;
     transform->rotation.x = std::clamp(transform->rotation.x, -89.0f, 89.0f);
 
     constexpr float pi = 3.14159265358979323846f;
@@ -40,7 +40,7 @@ void Controller::update(Ecs::World& world, float delta_seconds)
     const Ecs::Vec3 right {std::cos(yaw), 0.0f, std::sin(yaw)};
 
     float speed = 4.0f * delta_seconds;
-    if (Keyboard.isKeyDown(Keyboard.KEY_LCONTROL)) speed *= 3.0f;
+    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) speed *= 3.0f;
 
     auto move = [&](const Ecs::Vec3& direction, float scale) {
         transform->position.x += direction.x * scale;
@@ -48,12 +48,10 @@ void Controller::update(Ecs::World& world, float delta_seconds)
         transform->position.z += direction.z * scale;
     };
 
-    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(forward, speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(forward, -speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_D)) move(right, speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_A)) move(right, -speed);
-    if (Keyboard.isKeyDown(Keyboard.KEY_SPACE)) transform->position.y += speed;
-    if (Keyboard.isKeyDown(Keyboard.KEY_LSHIFT)) transform->position.y -= speed;
+    if (Keyboard.isKeyDown(Keyboard.KEY_W)) move(forward, -speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_S)) move(forward, speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_D)) move(right, -speed);
+    if (Keyboard.isKeyDown(Keyboard.KEY_A)) move(right, speed);
 
     world.markChanged();
 }
