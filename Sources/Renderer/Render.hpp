@@ -8,6 +8,11 @@
 
 namespace Renderer {
 
+struct LightingDefaults {
+    static constexpr float scene_ambient = 0.65f;
+    static constexpr float direct_diffuse = 0.75f;
+};
+
 class Rasterizer {
 public:
     bool init();
