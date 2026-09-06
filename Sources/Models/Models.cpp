@@ -1,7 +1,11 @@
 #include "Models/Models.hpp"
-#include "Models/Obj.hpp"
-#include "Models/Texture.hpp"
 
+#include "Models/Core/Texture.hpp"
+#include "Models/Formats/Fbx.hpp"
+#include "Models/Formats/Obj.hpp"
+
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <unordered_map>
 #include <utility>
@@ -26,28 +30,26 @@ std::string normalizedPath(const std::string& path)
     return (ec ? std::filesystem::path(path) : absolute).lexically_normal().string();
 }
 
-} // namespace
-
-ModelHandle load(const std::string& path, std::string *error)
+std::string lowerExtension(const std::string& path)
 {
-    if (error) error->clear();
-    const std::string key = normalizedPath(path);
-    if (const auto found = cache().find(key); found != cache().end()) return found->second;
+    std::string value = std::filesystem::path(path).extension().string();
+    std::transform(
+        value.begin(),
+        value.end(),
+        value.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); }
+    );
+    return value;
+}
 
-    const std::filesystem::path extension = std::filesystem::path(key).extension();
-    if (extension != ".obj" && extension != ".OBJ") {
-        if (error) *error = "unsupported model format: " + extension.string();
-        return INVALID_MODEL;
-    }
-
-    Obj::Document document;
-    if (!Obj::load(key, &document, error)) return INVALID_MODEL;
-
+template <typename Parts>
+ModelHandle storeModel(const std::string& key, Parts& source_parts)
+{
     Model model;
     model.path = key;
-    model.parts.reserve(document.parts.size());
+    model.parts.reserve(source_parts.size());
 
-    for (Obj::Part& source_part : document.parts) {
+    for (auto& source_part : source_parts) {
         const MeshHandle mesh_handle = static_cast<MeshHandle>(meshes().size());
         meshes().push_back(std::move(source_part.mesh));
 
@@ -60,6 +62,31 @@ ModelHandle load(const std::string& path, std::string *error)
     models().push_back(std::move(model));
     cache().emplace(key, handle);
     return handle;
+}
+
+} // namespace
+
+ModelHandle load(const std::string& path, std::string *error)
+{
+    if (error) error->clear();
+    const std::string key = normalizedPath(path);
+    if (const auto found = cache().find(key); found != cache().end()) return found->second;
+
+    const std::string extension = lowerExtension(key);
+    if (extension == ".obj") {
+        Obj::Document document;
+        if (!Obj::load(key, &document, error)) return INVALID_MODEL;
+        return storeModel(key, document.parts);
+    }
+
+    if (extension == ".fbx") {
+        Fbx::Document document;
+        if (!Fbx::load(key, &document, error)) return INVALID_MODEL;
+        return storeModel(key, document.parts);
+    }
+
+    if (error) *error = "unsupported model format: " + extension;
+    return INVALID_MODEL;
 }
 
 const ModelPart *part(ModelHandle handle, std::size_t index)
