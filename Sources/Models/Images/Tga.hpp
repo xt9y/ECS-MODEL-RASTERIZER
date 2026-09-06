@@ -1,18 +1,13 @@
 #ifndef RW_ENGINE_MODELS_IMAGES_TGA_HPP
 #define RW_ENGINE_MODELS_IMAGES_TGA_HPP
 
-#include <cstdint>
+#include "Models/Images/Image.hpp"
+
 #include <string>
-#include <vector>
 
 namespace Models::Tga {
 
-struct Image {
-    int width = 0;
-    int height = 0;
-    std::vector<std::uint8_t> rgba;
-    bool meaningful_alpha = false;
-};
+using Image = Images::Image;
 
 bool load(const std::string& path, Image *image, std::string *error = nullptr);
 
