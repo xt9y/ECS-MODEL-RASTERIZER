@@ -1,8 +1,9 @@
 #include "Renderer/Render.hpp"
 
+#include "Animation/Animation.hpp"
 #include "Camera.hpp"
-#include "Models/Models.hpp"
 #include "Models/Core/Texture.hpp"
+#include "Models/Models.hpp"
 
 #include <lwcgl/lwcgl.h>
 
@@ -145,6 +146,14 @@ void Rasterizer::render(const Ecs::World& world)
 {
     if (!initialized_) return;
 
+    for (auto cache = skin_cache_.begin(); cache != skin_cache_.end();) {
+        if (!world.alive(cache->first)) {
+            cache = skin_cache_.erase(cache);
+        } else {
+            ++cache;
+        }
+    }
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const Ecs::Entity camera_entity = Camera::activeCamera(world);
@@ -178,6 +187,72 @@ void Rasterizer::render(const Ecs::World& world)
 
         const Models::MeshData *mesh = Models::mesh(mesh_component->mesh);
         if (!mesh || mesh->indices.empty()) continue;
+
+        const Animation::Pose *pose = nullptr;
+        const Animation::SkinBindingComponent *skin_binding =
+            world.get<Animation::SkinBindingComponent>(entity);
+
+        const Animation::AnimatorComponent *animator = nullptr;
+        if (skin_binding && skin_binding->animator != Ecs::INVALID_ENTITY) {
+            animator = world.get<Animation::AnimatorComponent>(skin_binding->animator);
+            if (animator && !animator->pose.skin.empty()) pose = &animator->pose;
+        }
+
+        const SkinCache *skin = nullptr;
+        if (pose && animator) {
+            SkinCache& cache = skin_cache_[entity];
+            if (
+                cache.mesh != mesh_component->mesh ||
+                cache.animator != skin_binding->animator ||
+                cache.pose_revision != pose->revision ||
+                cache.positions.size() != mesh->vertices.size())
+            {
+                cache.mesh = mesh_component->mesh;
+                cache.animator = skin_binding->animator;
+                cache.pose_revision = pose->revision;
+                cache.positions.resize(mesh->vertices.size());
+                cache.normals.resize(mesh->vertices.size());
+
+                for (std::size_t index = 0u; index < mesh->vertices.size(); ++index) {
+                    const Models::Vertex& vertex = mesh->vertices[index];
+                    Animation::Vec3 position {
+                        vertex.position.x,
+                        vertex.position.y,
+                        vertex.position.z,
+                    };
+                    Animation::Vec3 normal {
+                        vertex.normal.x,
+                        vertex.normal.y,
+                        vertex.normal.z,
+                    };
+                    Animation::Vec3 skinned_position {};
+                    Animation::Vec3 skinned_normal {};
+
+                    Animation::skinVertex(
+                        *pose,
+                        vertex.skin,
+                        position,
+                        normal,
+                        &skinned_position,
+                        &skinned_normal
+                    );
+
+                    cache.positions[index] = {
+                        skinned_position.x,
+                        skinned_position.y,
+                        skinned_position.z,
+                    };
+                    cache.normals[index] = {
+                        skinned_normal.x,
+                        skinned_normal.y,
+                        skinned_normal.z,
+                    };
+                }
+            }
+            skin = &cache;
+        } else {
+            skin_cache_.erase(entity);
+        }
 
         const Models::MaterialData *material = Models::material(mesh_component->material);
         const float opacity = material ? std::clamp(material->opacity, 0.0f, 1.0f) : 1.0f;
@@ -218,9 +293,18 @@ void Rasterizer::render(const Ecs::World& world)
         for (const std::uint32_t index : mesh->indices) {
             if (index >= mesh->vertices.size()) continue;
             const Models::Vertex& vertex = mesh->vertices[index];
-            glNormal3f(vertex.normal.x, vertex.normal.y, vertex.normal.z);
-            if (texture_id != 0u) glTexCoord2f(vertex.uv.x, 1.0f - vertex.uv.y);
-            glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
+
+            if (skin) {
+                const Vec3& normal = skin->normals[index];
+                const Vec3& position = skin->positions[index];
+                glNormal3f(normal.x, normal.y, normal.z);
+                if (texture_id != 0u) glTexCoord2f(vertex.uv.x, 1.0f - vertex.uv.y);
+                glVertex3f(position.x, position.y, position.z);
+            } else {
+                glNormal3f(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+                if (texture_id != 0u) glTexCoord2f(vertex.uv.x, 1.0f - vertex.uv.y);
+                glVertex3f(vertex.position.x, vertex.position.y, vertex.position.z);
+            }
         }
         glEnd();
         glPopMatrix();
@@ -242,6 +326,7 @@ void Rasterizer::shutdown()
         if (id != 0u) glDeleteTextures(1, &id);
     }
     textures_.clear();
+    skin_cache_.clear();
     initialized_ = false;
 }
 
