@@ -55,9 +55,8 @@ void build(C_Build *b)
         "https://github.com/ufbx/ufbx.git",
         "v0.23.0"
     );
-    c_dep_source(ufbx);
+    c_dep_header_only(ufbx);
     c_dep_include(ufbx, ".");
-    c_dep_sources(ufbx, "ufbx.c");
     c_use(library, ufbx);
 
     c_flag(library, "-std=c++20");
