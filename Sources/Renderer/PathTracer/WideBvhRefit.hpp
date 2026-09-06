@@ -28,12 +28,13 @@ bool refitWideBvh(
 // Copies a BLAS into a global node/triangle address space. Interior child
 // references and encoded leaf-first indices are rebased, while all bounds and
 // leaf counts remain unchanged.
-void appendOffsetWideBvh(
+bool appendOffsetWideBvh(
     const BuildResult& bvh,
     std::uint32_t node_offset,
     std::uint32_t triangle_offset,
     std::vector<WideNode> *nodes,
-    std::vector<Triangle> *triangles
+    std::vector<Triangle> *triangles,
+    std::string *error = nullptr
 );
 
 } // namespace Renderer::PathTracerAccel
