@@ -7,6 +7,8 @@
 
 namespace Renderer::PathTracerGpu {
 
+using Mat4 = std::array<float, 16>;
+
 struct alignas(16) Ray {
     // xyz origin, w = source/output pixel encoded with uintBitsToFloat.
     std::array<float, 4> origin_pixel{};
@@ -21,6 +23,8 @@ struct alignas(16) Surface {
     std::array<float, 4> normal_material{};
     // xy UV, z source pixel for secondary surfaces, w reserved.
     std::array<float, 4> uv_source{};
+    // Exact direct point-light contribution for primary surfaces.
+    std::array<float, 4> direct{};
 };
 
 struct alignas(16) Reservoir {
@@ -40,11 +44,21 @@ struct alignas(16) Moments {
     std::array<float, 4> value{};
 };
 
-struct alignas(16) QueueCounters {
-    std::uint32_t hit_count = 0u;
-    std::uint32_t bounce_count = 0u;
-    std::uint32_t reserved0 = 0u;
-    std::uint32_t reserved1 = 0u;
+// BLAS instance referenced by TLAS leaves. Static world geometry is represented
+// as one identity-transform instance; deforming meshes get their own local BLAS.
+struct alignas(16) Instance {
+    Mat4 object_to_world {
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f,
+    };
+    Mat4 world_to_object = object_to_world;
+    // x = first BLAS node in global node buffer
+    // y = BLAS node count
+    // z = first triangle in global triangle buffer
+    // w = triangle count
+    std::array<std::uint32_t, 4> data{};
 };
 
 struct alignas(16) DispatchCommand {
@@ -54,9 +68,20 @@ struct alignas(16) DispatchCommand {
     std::uint32_t padding = 0u;
 };
 
-struct alignas(16) DispatchCommands {
-    DispatchCommand hits{};
-    DispatchCommand bounces{};
+// Fixed header of the combined queue/control SSBO. A uint hit_queue[] runtime
+// array starts immediately after this structure. The same buffer is also bound
+// as GL_DISPATCH_INDIRECT_BUFFER, so command offsets are compile-time constants.
+struct alignas(16) QueueControl {
+    // x = hit count, y = bounce count, z/w reserved.
+    std::array<std::uint32_t, 4> counters{};
+    DispatchCommand hit_dispatch{};
+    DispatchCommand bounce_dispatch{};
+    std::array<std::uint32_t, 4> bucket_count0{};
+    std::array<std::uint32_t, 4> bucket_count1{};
+    std::array<std::uint32_t, 4> bucket_offset0{};
+    std::array<std::uint32_t, 4> bucket_offset1{};
+    std::array<std::uint32_t, 4> bucket_cursor0{};
+    std::array<std::uint32_t, 4> bucket_cursor1{};
 };
 
 struct alignas(16) RadianceCacheEntry {
@@ -67,16 +92,20 @@ struct alignas(16) RadianceCacheEntry {
 };
 
 static_assert(sizeof(Ray) == 32u);
-static_assert(sizeof(Surface) == 48u);
+static_assert(sizeof(Surface) == 64u);
 static_assert(sizeof(Reservoir) == 32u);
 static_assert(sizeof(Lighting) == 16u);
 static_assert(sizeof(Moments) == 16u);
-static_assert(sizeof(QueueCounters) == 16u);
+static_assert(sizeof(Instance) == 144u);
 static_assert(sizeof(DispatchCommand) == 16u);
-static_assert(sizeof(DispatchCommands) == 32u);
+static_assert(sizeof(QueueControl) == 144u);
 static_assert(sizeof(RadianceCacheEntry) == 32u);
 
+constexpr std::size_t HIT_DISPATCH_OFFSET = 16u;
+constexpr std::size_t BOUNCE_DISPATCH_OFFSET = 32u;
+constexpr std::size_t HIT_QUEUE_OFFSET = sizeof(QueueControl);
 constexpr std::size_t RADIANCE_CACHE_ENTRIES = 65536u;
+constexpr std::uint32_t GI_PHASE_COUNT = 4u;
 
 } // namespace Renderer::PathTracerGpu
 
