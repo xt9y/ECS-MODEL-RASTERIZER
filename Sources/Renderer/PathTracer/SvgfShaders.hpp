@@ -9,7 +9,8 @@ struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; 
 struct ReservoirData { vec4 sample_position_m; vec4 radiance_weight; };
 struct LightingData { vec4 color; };
 struct MomentsData { vec4 value; };
-uniform ivec2 uResolution; uniform int uHistoryValid;
+uniform int uResolutionX, uResolutionY, uHistoryValid;
+#define uResolution ivec2(uResolutionX, uResolutionY)
 uint pixelIndex(ivec2 p){return uint(p.y*uResolution.x+p.x);}bool inBounds(ivec2 p){return all(greaterThanEqual(p,ivec2(0)))&&all(lessThan(p,uResolution));}
 bool validSurface(SurfaceData s){return s.position_depth.w>0.0;}float luminance(vec3 c){return dot(max(c,vec3(0)),vec3(0.2126,0.7152,0.0722));}
 bool historyCompatible(SurfaceData current,SurfaceData previous,vec3 previous_camera_position){if(!validSurface(current)||!validSurface(previous))return false;float expected=length(current.position_depth.xyz-previous_camera_position);float de=abs(previous.position_depth.w-expected)/max(max(previous.position_depth.w,expected),1.0e-3);float ns=dot(current.normal_material.xyz,previous.normal_material.xyz);float we=length(current.position_depth.xyz-previous.position_depth.xyz);float wt=max(0.025,expected*0.025);return ns>=0.88&&de<=0.05&&we<=wt;}
@@ -52,8 +53,13 @@ void main(){ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);if(!inBounds(pixel))retu
 )GLSL";
 
 inline constexpr const char *copy_to_image = R"GLSL(
-layout(local_size_x=8,local_size_y=8) in;struct LightingData{vec4 color;};layout(std430,binding=0) readonly buffer Lighting{LightingData lighting[];};layout(rgba16f,binding=0) uniform writeonly image2D uOutput;uniform ivec2 uResolution;
-void main(){ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);if(any(greaterThanEqual(pixel,uResolution)))return;uint index=uint(pixel.y*uResolution.x+pixel.x);imageStore(uOutput,pixel,vec4(max(lighting[index].color.rgb,vec3(0)),1));}
+#version 430
+layout(local_size_x=8,local_size_y=8) in;
+struct LightingData{vec4 color;};
+layout(std430,binding=0) readonly buffer Lighting{LightingData lighting[];};
+layout(rgba16f,binding=0) uniform writeonly image2D uOutput;
+uniform int uResolutionX, uResolutionY;
+void main(){ivec2 resolution=ivec2(uResolutionX,uResolutionY);ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);if(any(greaterThanEqual(pixel,resolution)))return;uint index=uint(pixel.y*resolution.x+pixel.x);imageStore(uOutput,pixel,vec4(max(lighting[index].color.rgb,vec3(0)),1));}
 )GLSL";
 
 inline constexpr const char *present_vertex = R"GLSL(
