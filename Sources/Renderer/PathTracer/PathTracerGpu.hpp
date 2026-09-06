@@ -8,10 +8,10 @@
 namespace Renderer::PathTracerGpu {
 
 struct alignas(16) Ray {
-    std::array<float, 4> origin{};
-    std::array<float, 4> direction{};
-    // x = source/output pixel, y = RNG state, z/w reserved.
-    std::array<std::uint32_t, 4> data{};
+    // xyz origin, w = source/output pixel encoded with uintBitsToFloat.
+    std::array<float, 4> origin_pixel{};
+    // xyz direction, w = RNG state encoded with uintBitsToFloat.
+    std::array<float, 4> direction_rng{};
 };
 
 struct alignas(16) Surface {
@@ -19,21 +19,16 @@ struct alignas(16) Surface {
     std::array<float, 4> position_depth{};
     // xyz normal, w material index encoded as float.
     std::array<float, 4> normal_material{};
-    // xy UV, z/w reserved.
-    std::array<float, 4> uv{};
-    // RGB exact direct-light contribution, w visibility/history marker.
-    std::array<float, 4> direct{};
+    // xy UV, z source pixel for secondary surfaces, w reserved.
+    std::array<float, 4> uv_source{};
 };
 
 struct alignas(16) Reservoir {
-    // xyz secondary sample position, w valid flag.
-    std::array<float, 4> sample_position{};
-    // xyz secondary normal, w source PDF/metadata.
-    std::array<float, 4> sample_normal{};
-    // RGB indirect contribution carried by selected sample, w target luminance.
-    std::array<float, 4> radiance{};
-    // x weight sum, y selected target, z effective M, w age.
-    std::array<float, 4> weights{};
+    // xyz secondary sample position, w effective M; M <= 0 means invalid.
+    std::array<float, 4> sample_position_m{};
+    // RGB selected indirect contribution, w reservoir weight sum.
+    // Selected target is recomputed as luminance(RGB).
+    std::array<float, 4> radiance_weight{};
 };
 
 struct alignas(16) Lighting {
@@ -65,15 +60,15 @@ struct alignas(16) DispatchCommands {
 };
 
 struct alignas(16) RadianceCacheEntry {
-    // x key (0 = empty), y sample count, z age/reserved, w reserved.
+    // x key (0 = empty), y sample count, z/w reserved.
     std::array<std::uint32_t, 4> header{};
     // x/y/z fixed-point RGB sums, w reserved.
     std::array<std::uint32_t, 4> radiance{};
 };
 
-static_assert(sizeof(Ray) == 48u);
-static_assert(sizeof(Surface) == 64u);
-static_assert(sizeof(Reservoir) == 64u);
+static_assert(sizeof(Ray) == 32u);
+static_assert(sizeof(Surface) == 48u);
+static_assert(sizeof(Reservoir) == 32u);
 static_assert(sizeof(Lighting) == 16u);
 static_assert(sizeof(Moments) == 16u);
 static_assert(sizeof(QueueCounters) == 16u);
