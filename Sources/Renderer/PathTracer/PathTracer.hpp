@@ -3,24 +3,11 @@
 
 #include "Ecs/Ecs.hpp"
 
-// PathTracer.cpp uses the standard OpenGL texture API. Preload lwcgl's GL11
-// compatibility declarations without its LWJGL-style function macros so the
-// later compatibility include cannot replace glGenTextures/glDeleteTextures.
-#ifndef LWCGL_IMPLEMENTATION
-#define RW_PATHTRACER_DEFINED_LWCGL_IMPLEMENTATION
-#define LWCGL_IMPLEMENTATION
-#endif
-#include <lwcgl/gl11_compat.h>
-#ifdef RW_PATHTRACER_DEFINED_LWCGL_IMPLEMENTATION
-#undef LWCGL_IMPLEMENTATION
-#undef RW_PATHTRACER_DEFINED_LWCGL_IMPLEMENTATION
-#endif
-
 namespace Renderer {
 
 struct PathTracerSettings {
     bool enabled = true;
-    int resolution_divisor = 8;
+    int resolution_divisor = 1;
     int samples_per_frame = 1;
     int max_bounces = 2;
     float exposure = 1.0f;
