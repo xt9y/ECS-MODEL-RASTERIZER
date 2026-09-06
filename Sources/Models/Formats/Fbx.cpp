@@ -4,17 +4,22 @@
 #include "Models/ThirdParty/Ufbx.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace Models::Fbx {
 namespace {
+
+constexpr float kTargetSampleRate = 30.0f;
+constexpr std::size_t kMaximumClipSamples = 18000u;
 
 std::string toString(ufbx_string value)
 {
@@ -38,6 +43,61 @@ Vec2 toVec2(ufbx_vec2 value)
         static_cast<float>(value.x),
         static_cast<float>(value.y),
     };
+}
+
+Animation::Vec3 toAnimationVec3(ufbx_vec3 value)
+{
+    return {
+        static_cast<float>(value.x),
+        static_cast<float>(value.y),
+        static_cast<float>(value.z),
+    };
+}
+
+Animation::Quat toAnimationQuat(ufbx_quat value)
+{
+    return {
+        static_cast<float>(value.x),
+        static_cast<float>(value.y),
+        static_cast<float>(value.z),
+        static_cast<float>(value.w),
+    };
+}
+
+Animation::Transform toAnimationTransform(ufbx_transform value)
+{
+    return {
+        toAnimationVec3(value.translation),
+        toAnimationQuat(value.rotation),
+        toAnimationVec3(value.scale),
+    };
+}
+
+Animation::Mat4 toAnimationMatrix(ufbx_matrix value)
+{
+    Animation::Mat4 result;
+    result.value = {
+        static_cast<float>(value.m00),
+        static_cast<float>(value.m10),
+        static_cast<float>(value.m20),
+        0.0f,
+
+        static_cast<float>(value.m01),
+        static_cast<float>(value.m11),
+        static_cast<float>(value.m21),
+        0.0f,
+
+        static_cast<float>(value.m02),
+        static_cast<float>(value.m12),
+        static_cast<float>(value.m22),
+        0.0f,
+
+        static_cast<float>(value.m03),
+        static_cast<float>(value.m13),
+        static_cast<float>(value.m23),
+        1.0f,
+    };
+    return result;
 }
 
 Vec3 normalize(Vec3 value)
@@ -147,6 +207,173 @@ MaterialData convertMaterial(
     return result;
 }
 
+struct SkeletonBuild {
+    std::vector<const ufbx_node *> nodes;
+    std::unordered_map<const ufbx_node *, std::uint16_t> indices;
+    bool overflow = false;
+
+    void add(const ufbx_node *node)
+    {
+        if (!node || indices.find(node) != indices.end() || overflow) return;
+        add(node->parent);
+        if (overflow) return;
+
+        if (nodes.size() >= static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max())) {
+            overflow = true;
+            return;
+        }
+
+        const std::uint16_t index = static_cast<std::uint16_t>(nodes.size());
+        nodes.push_back(node);
+        indices.emplace(node, index);
+    }
+};
+
+SkeletonBuild collectSkeleton(const ufbx_scene *scene)
+{
+    SkeletonBuild result;
+    for (std::size_t skin_index = 0u; skin_index < scene->skin_deformers.count; ++skin_index) {
+        const ufbx_skin_deformer *skin = scene->skin_deformers.data[skin_index];
+        if (!skin) continue;
+
+        for (std::size_t cluster_index = 0u; cluster_index < skin->clusters.count; ++cluster_index) {
+            const ufbx_skin_cluster *cluster = skin->clusters.data[cluster_index];
+            if (cluster && cluster->bone_node) result.add(cluster->bone_node);
+        }
+    }
+    return result;
+}
+
+Animation::Skeleton makeSkeleton(
+    const SkeletonBuild& build,
+    const std::filesystem::path& source_path)
+{
+    Animation::Skeleton result;
+    result.name = source_path.stem().string();
+    result.bones.reserve(build.nodes.size());
+
+    for (const ufbx_node *node : build.nodes) {
+        Animation::Bone bone;
+        bone.name = toString(node->name);
+        bone.bind_local = toAnimationTransform(node->local_transform);
+
+        if (node->parent) {
+            const auto parent = build.indices.find(node->parent);
+            if (parent != build.indices.end()) {
+                bone.parent = static_cast<std::int32_t>(parent->second);
+            }
+        }
+
+        const ufbx_matrix inverse_bind = ufbx_matrix_invert(&node->node_to_world);
+        bone.inverse_bind = toAnimationMatrix(inverse_bind);
+        result.bones.push_back(std::move(bone));
+    }
+
+    return result;
+}
+
+std::vector<Animation::AnimationClip> makeAnimations(
+    const ufbx_scene *scene,
+    const SkeletonBuild& skeleton)
+{
+    std::vector<Animation::AnimationClip> result;
+    if (skeleton.nodes.empty()) return result;
+
+    result.reserve(scene->anim_stacks.count);
+    for (std::size_t animation_index = 0u; animation_index < scene->anim_stacks.count; ++animation_index) {
+        const ufbx_anim_stack *stack = scene->anim_stacks.data[animation_index];
+        if (!stack || !stack->anim) continue;
+
+        const double duration_seconds = std::max(stack->time_end - stack->time_begin, 0.0);
+        std::size_t sample_count = 1u;
+        if (duration_seconds > 0.0) {
+            sample_count = static_cast<std::size_t>(std::ceil(duration_seconds * kTargetSampleRate)) + 1u;
+            sample_count = std::clamp<std::size_t>(sample_count, 2u, kMaximumClipSamples);
+        }
+
+        Animation::AnimationClip clip;
+        clip.name = toString(stack->name);
+        if (clip.name.empty()) clip.name = "Animation_" + std::to_string(animation_index);
+        clip.duration = static_cast<float>(duration_seconds);
+        clip.sample_rate = duration_seconds > 0.0 && sample_count > 1u
+            ? static_cast<float>(static_cast<double>(sample_count - 1u) / duration_seconds)
+            : kTargetSampleRate;
+        clip.tracks.resize(skeleton.nodes.size());
+
+        for (std::size_t bone = 0u; bone < skeleton.nodes.size(); ++bone) {
+            Animation::Track& track = clip.tracks[bone];
+            track.samples.reserve(sample_count);
+
+            for (std::size_t sample = 0u; sample < sample_count; ++sample) {
+                const double factor = sample_count > 1u
+                    ? static_cast<double>(sample) / static_cast<double>(sample_count - 1u)
+                    : 0.0;
+                const double time = stack->time_begin + duration_seconds * factor;
+                track.samples.push_back(toAnimationTransform(
+                    ufbx_evaluate_transform(stack->anim, skeleton.nodes[bone], time)
+                ));
+            }
+        }
+
+        result.push_back(std::move(clip));
+    }
+
+    return result;
+}
+
+Animation::SkinWeights skinWeights(
+    const ufbx_skin_deformer *skin,
+    std::uint32_t vertex,
+    const SkeletonBuild& skeleton)
+{
+    Animation::SkinWeights result;
+    if (!skin || vertex >= skin->vertices.count) return result;
+
+    struct Influence {
+        float weight = 0.0f;
+        std::uint16_t joint = 0u;
+    };
+
+    std::array<Influence, 4> strongest {};
+    const ufbx_skin_vertex vertex_weights = skin->vertices.data[vertex];
+
+    for (std::size_t index = 0u; index < vertex_weights.num_weights; ++index) {
+        const ufbx_skin_weight weight = skin->weights.data[vertex_weights.weight_begin + index];
+        if (weight.weight <= 0.0 || weight.cluster_index >= skin->clusters.count) continue;
+
+        const ufbx_skin_cluster *cluster = skin->clusters.data[weight.cluster_index];
+        if (!cluster || !cluster->bone_node) continue;
+
+        const auto bone = skeleton.indices.find(cluster->bone_node);
+        if (bone == skeleton.indices.end()) continue;
+
+        Influence candidate {
+            static_cast<float>(weight.weight),
+            bone->second,
+        };
+
+        for (std::size_t slot = 0u; slot < strongest.size(); ++slot) {
+            if (candidate.weight <= strongest[slot].weight) continue;
+            for (std::size_t move = strongest.size() - 1u; move > slot; --move) {
+                strongest[move] = strongest[move - 1u];
+            }
+            strongest[slot] = candidate;
+            break;
+        }
+    }
+
+    float total = 0.0f;
+    for (const Influence& influence : strongest) total += influence.weight;
+    if (total <= 1.0e-8f) return result;
+
+    const float inverse_total = 1.0f / total;
+    for (std::size_t index = 0u; index < strongest.size(); ++index) {
+        result.joints[index] = strongest[index].joint;
+        result.weights[index] = strongest[index].weight * inverse_total;
+    }
+    return result;
+}
+
 struct Builder {
     const ufbx_material *source_material = nullptr;
     MeshData mesh;
@@ -179,13 +406,28 @@ bool load(const std::string& path, Document *document, std::string *error)
         return false;
     }
 
-    document->has_skeleton = scene->bones.count > 0u || scene->skin_deformers.count > 0u;
-    document->animation_count = scene->anim_stacks.count;
-    const std::filesystem::path directory = std::filesystem::path(path).parent_path();
+    const std::filesystem::path source_path(path);
+    const std::filesystem::path directory = source_path.parent_path();
+    const SkeletonBuild skeleton_build = collectSkeleton(scene);
+    if (skeleton_build.overflow) {
+        ufbx_free_scene(scene);
+        if (error) *error = "FBX skeleton exceeds 65535 nodes: " + path;
+        return false;
+    }
+
+    document->has_skeleton = !skeleton_build.nodes.empty();
+    if (document->has_skeleton) {
+        document->skeleton = makeSkeleton(skeleton_build, source_path);
+        document->animations = makeAnimations(scene, skeleton_build);
+    }
 
     for (std::size_t mesh_index = 0u; mesh_index < scene->meshes.count; ++mesh_index) {
         const ufbx_mesh *mesh = scene->meshes.data[mesh_index];
         if (!mesh || mesh->num_faces == 0u) continue;
+
+        const ufbx_skin_deformer *skin = mesh->skin_deformers.count > 0u
+            ? mesh->skin_deformers.data[0]
+            : nullptr;
 
         const std::size_t triangle_index_capacity =
             std::max<std::size_t>(static_cast<std::size_t>(mesh->max_face_triangles) * 3u, 3u);
@@ -247,6 +489,15 @@ bool load(const std::string& path, Document *document, std::string *error)
                     vertex.position = toVec3(world_position);
                     vertex.normal = normalize(toVec3(world_normal));
                     vertex.uv = toVec2(uv);
+
+                    if (skin && index < mesh->vertex_indices.count) {
+                        vertex.skin = skinWeights(
+                            skin,
+                            mesh->vertex_indices.data[index],
+                            skeleton_build
+                        );
+                    }
+
                     builder.mesh.indices.push_back(
                         static_cast<std::uint32_t>(builder.mesh.vertices.size())
                     );
