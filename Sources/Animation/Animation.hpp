@@ -156,6 +156,21 @@ Mat4 multiply(const Mat4& a, const Mat4& b);
 Vec3 transformPoint(const Mat4& matrix, Vec3 point);
 Vec3 transformVector(const Mat4& matrix, Vec3 vector);
 
+void buildSkinMatrices(
+    const Pose& pose,
+    const std::vector<Mat4>& inverse_bind,
+    std::vector<Mat4> *out_matrices
+);
+
+bool skinVertex(
+    const std::vector<Mat4>& skin_matrices,
+    const SkinWeights& skin,
+    Vec3 position,
+    Vec3 normal,
+    Vec3 *out_position,
+    Vec3 *out_normal
+);
+
 bool skinVertex(
     const Pose& pose,
     const SkinWeights& skin,
