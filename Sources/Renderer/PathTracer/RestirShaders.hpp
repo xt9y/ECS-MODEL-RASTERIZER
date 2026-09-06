@@ -5,7 +5,7 @@ namespace Renderer::RestirShaders {
 
 inline constexpr const char *common = R"GLSL(
 #version 430
-struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; };
+struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; vec4 direct; };
 struct ReservoirData { vec4 sample_position_m; vec4 radiance_weight; };
 uniform int uResolutionX,uResolutionY,uFrameIndex,uHistoryValid;
 #define uResolution ivec2(uResolutionX,uResolutionY)
