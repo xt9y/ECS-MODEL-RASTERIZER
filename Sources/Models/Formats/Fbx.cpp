@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -148,7 +147,7 @@ const ufbx_texture *baseColorTexture(const ufbx_material *material)
 
 MaterialData convertMaterial(
     const ufbx_material *material,
-    const std::filesystem::path& directory)
+    const std::filesystem::path& source_path)
 {
     MaterialData result;
     if (!material) return result;
@@ -181,27 +180,39 @@ MaterialData convertMaterial(
     }
 
     const ufbx_texture *texture = baseColorTexture(material);
-    if (texture) {
-        std::string filename = toString(texture->relative_filename);
-        if (filename.empty()) filename = toString(texture->filename);
-        if (!filename.empty()) {
-            std::filesystem::path texture_path(filename);
-            if (texture_path.is_relative()) texture_path = directory / texture_path;
-            texture_path = texture_path.lexically_normal();
-            result.texture_path = texture_path.string();
+    if (!texture) return result;
 
-            std::string extension = texture_path.extension().string();
-            std::transform(
-                extension.begin(),
-                extension.end(),
-                extension.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); }
-            );
-            if (extension == ".tga") {
-                std::string ignored_error;
-                result.diffuse_texture = loadTexture(result.texture_path, &ignored_error);
-            }
+    std::string filename = toString(texture->relative_filename);
+    if (filename.empty()) filename = toString(texture->filename);
+
+    if (texture->content.data && texture->content.size > 0u) {
+        std::string texture_name = toString(texture->name);
+        if (texture_name.empty()) texture_name = filename;
+        if (texture_name.empty()) texture_name = result.name.empty() ? "embedded" : result.name;
+
+        const std::string cache_key =
+            source_path.lexically_normal().string() + "#embedded-texture:" + texture_name;
+        std::string ignored_error;
+        result.diffuse_texture = loadTextureMemory(
+            cache_key,
+            texture->content.data,
+            texture->content.size,
+            &ignored_error
+        );
+        if (result.diffuse_texture != INVALID_TEXTURE) {
+            result.texture_path = cache_key;
+            return result;
         }
+    }
+
+    if (!filename.empty()) {
+        std::filesystem::path texture_path(filename);
+        if (texture_path.is_relative()) texture_path = source_path.parent_path() / texture_path;
+        texture_path = texture_path.lexically_normal();
+        result.texture_path = texture_path.string();
+
+        std::string ignored_error;
+        result.diffuse_texture = loadTexture(result.texture_path, &ignored_error);
     }
 
     return result;
@@ -407,7 +418,6 @@ bool load(const std::string& path, Document *document, std::string *error)
     }
 
     const std::filesystem::path source_path(path);
-    const std::filesystem::path directory = source_path.parent_path();
     const SkeletonBuild skeleton_build = collectSkeleton(scene);
     if (skeleton_build.overflow) {
         ufbx_free_scene(scene);
@@ -510,7 +520,7 @@ bool load(const std::string& path, Document *document, std::string *error)
                 builder.mesh.bounds = calculateBounds(builder.mesh.vertices);
                 document->parts.push_back({
                     std::move(builder.mesh),
-                    convertMaterial(builder.source_material, directory),
+                    convertMaterial(builder.source_material, source_path),
                 });
             }
         }
