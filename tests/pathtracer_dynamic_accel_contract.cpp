@@ -46,7 +46,7 @@ int main()
         bind_pose.push_back(triangleAt(static_cast<float>(i % 8u), -2.0f - static_cast<float>(i / 8u), i % 3u));
     }
 
-    BuildResult dynamic_blas = buildWideBvh(bind_pose);
+    BuildResult dynamic_blas = buildRefittableWideBvh(bind_pose);
     assert(dynamic_blas.valid);
     const std::size_t original_node_count = dynamic_blas.nodes.size();
     const std::size_t original_triangle_count = dynamic_blas.triangles.size();
