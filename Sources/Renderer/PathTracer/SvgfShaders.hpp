@@ -5,7 +5,7 @@ namespace Renderer::SvgfShaders {
 
 inline constexpr const char *common = R"GLSL(
 #version 430
-struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; };
+struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; vec4 direct; };
 struct ReservoirData { vec4 sample_position_m; vec4 radiance_weight; };
 struct LightingData { vec4 color; };
 struct MomentsData { vec4 value; };
@@ -20,9 +20,8 @@ inline constexpr const char *compose = R"GLSL(
 layout(local_size_x=8,local_size_y=8) in;
 layout(std430,binding=0) readonly buffer PrimarySurfaces{SurfaceData primary_surfaces[];};
 layout(std430,binding=1) readonly buffer Reservoirs{ReservoirData reservoirs[];};
-layout(std430,binding=2) readonly buffer DirectLighting{LightingData direct_lighting[];};
-layout(std430,binding=3) writeonly buffer CurrentLighting{LightingData current_lighting[];};
-void main(){ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);if(!inBounds(pixel))return;uint index=pixelIndex(pixel);SurfaceData surface=primary_surfaces[index];vec3 color=vec3(0);if(validSurface(surface)){color=max(direct_lighting[index].color.rgb,vec3(0));ReservoirData r=reservoirs[index];float m=r.sample_position_m.w;float wsum=r.radiance_weight.w;float target=max(luminance(r.radiance_weight.rgb),1.0e-6);if(m>0.0&&wsum>0.0){float normalization=clamp(wsum/max(target*m,1.0e-8),0.0,4.0);color+=max(r.radiance_weight.rgb,vec3(0))*normalization;}}current_lighting[index].color=vec4(color,1);}
+layout(std430,binding=2) writeonly buffer CurrentLighting{LightingData current_lighting[];};
+void main(){ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);if(!inBounds(pixel))return;uint index=pixelIndex(pixel);SurfaceData surface=primary_surfaces[index];vec3 color=vec3(0);if(validSurface(surface)){color=max(surface.direct.rgb,vec3(0));ReservoirData r=reservoirs[index];float m=r.sample_position_m.w;float wsum=r.radiance_weight.w;float target=max(luminance(r.radiance_weight.rgb),1.0e-6);if(m>0.0&&wsum>0.0){float normalization=clamp(wsum/max(target*m,1.0e-8),0.0,4.0);color+=max(r.radiance_weight.rgb,vec3(0))*normalization;}}current_lighting[index].color=vec4(color,1);}
 )GLSL";
 
 inline constexpr const char *temporal_filter = R"GLSL(
