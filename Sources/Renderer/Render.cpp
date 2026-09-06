@@ -1,7 +1,8 @@
 #include "Renderer/Render.hpp"
 
+#include "Camera.hpp"
 #include "Models/Models.hpp"
-#include "Models/Texture.hpp"
+#include "Models/Core/Texture.hpp"
 
 #include <lwcgl/lwcgl.h>
 
@@ -13,10 +14,10 @@ namespace {
 
 void applyCamera(const Ecs::World& world)
 {
-    const Ecs::Entity camera_entity = world.activeCamera();
+    const Ecs::Entity camera_entity = Camera::activeCamera(world);
     if (camera_entity == Ecs::INVALID_ENTITY) return;
 
-    const Ecs::TransformComponent *transform = world.getTransform(camera_entity);
+    const Transform *transform = world.get<Transform>(camera_entity);
     if (!transform) return;
 
     glRotatef(-transform->rotation.x, 1.0f, 0.0f, 0.0f);
@@ -25,7 +26,7 @@ void applyCamera(const Ecs::World& world)
     glTranslatef(-transform->position.x, -transform->position.y, -transform->position.z);
 }
 
-void applyTransform(const Ecs::TransformComponent& transform)
+void applyTransform(const Transform& transform)
 {
     glTranslatef(transform.position.x, transform.position.y, transform.position.z);
     glRotatef(transform.rotation.x, 1.0f, 0.0f, 0.0f);
@@ -146,10 +147,10 @@ void Rasterizer::render(const Ecs::World& world)
 
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    const Ecs::Entity camera_entity = world.activeCamera();
-    const Ecs::CameraComponent *camera = camera_entity == Ecs::INVALID_ENTITY
+    const Ecs::Entity camera_entity = Camera::activeCamera(world);
+    const Camera::CameraComponent *camera = camera_entity == Ecs::INVALID_ENTITY
         ? nullptr
-        : world.getCamera(camera_entity);
+        : world.get<Camera::CameraComponent>(camera_entity);
 
     glMatrixMode(GL_PROJECTION);
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
@@ -170,9 +171,9 @@ void Rasterizer::render(const Ecs::World& world)
     if (use_gi) gi_.begin(world);
 
     for (const Ecs::Entity entity : world.entities()) {
-        const Ecs::RenderableComponent *renderable = world.getRenderable(entity);
-        const Ecs::MeshComponent *mesh_component = world.getMesh(entity);
-        const Ecs::TransformComponent *transform = world.getTransform(entity);
+        const RenderableComponent *renderable = world.get<RenderableComponent>(entity);
+        const MeshComponent *mesh_component = world.get<MeshComponent>(entity);
+        const Transform *transform = world.get<Transform>(entity);
         if (!renderable || !renderable->visible || !mesh_component || !transform) continue;
 
         const Models::MeshData *mesh = Models::mesh(mesh_component->mesh);
