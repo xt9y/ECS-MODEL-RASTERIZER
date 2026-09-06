@@ -1,8 +1,9 @@
 #ifndef RW_ENGINE_MODELS_CORE_TEXTURE_HPP
 #define RW_ENGINE_MODELS_CORE_TEXTURE_HPP
 
-#include "Models/Images/Tga.hpp"
+#include "Models/Images/Image.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -13,10 +14,16 @@ constexpr TextureHandle INVALID_TEXTURE = UINT32_MAX;
 
 struct TextureAsset {
     std::string path;
-    Tga::Image image;
+    Images::Image image;
 };
 
 TextureHandle loadTexture(const std::string& path, std::string *error = nullptr);
+TextureHandle loadTextureMemory(
+    const std::string& cache_key,
+    const void *data,
+    std::size_t size,
+    std::string *error = nullptr
+);
 const TextureAsset *texture(TextureHandle handle);
 void clearTextureCache();
 
