@@ -9,6 +9,12 @@ namespace Renderer::PathTracerGpu {
 
 using Mat4 = std::array<float, 16>;
 
+struct alignas(16) Material {
+    std::array<float, 4> base_color {1.0f, 1.0f, 1.0f, 1.0f};
+    // x = diffuse texture slot, remaining fields reserved.
+    std::array<std::int32_t, 4> data {-1, 0, 0, 0};
+};
+
 struct alignas(16) Ray {
     // xyz origin, w = source/output pixel encoded with uintBitsToFloat.
     std::array<float, 4> origin_pixel{};
@@ -91,6 +97,7 @@ struct alignas(16) RadianceCacheEntry {
     std::array<std::uint32_t, 4> radiance{};
 };
 
+static_assert(sizeof(Material) == 32u);
 static_assert(sizeof(Ray) == 32u);
 static_assert(sizeof(Surface) == 64u);
 static_assert(sizeof(Reservoir) == 32u);
