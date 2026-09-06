@@ -30,6 +30,16 @@ std::string normalizedPath(const std::string& path)
         .string();
 }
 
+TextureHandle store(
+    std::string key,
+    Images::Image image)
+{
+    const TextureHandle handle = static_cast<TextureHandle>(assets().size());
+    assets().push_back({key, std::move(image)});
+    cache().emplace(std::move(key), handle);
+    return handle;
+}
+
 } // namespace
 
 TextureHandle loadTexture(const std::string& path, std::string *error)
@@ -44,13 +54,29 @@ TextureHandle loadTexture(const std::string& path, std::string *error)
     const auto found = cache().find(key);
     if (found != cache().end()) return found->second;
 
-    Tga::Image image;
-    if (!Tga::load(key, &image, error)) return INVALID_TEXTURE;
+    Images::Image image;
+    if (!Images::load(key, &image, error)) return INVALID_TEXTURE;
+    return store(key, std::move(image));
+}
 
-    const TextureHandle handle = static_cast<TextureHandle>(assets().size());
-    assets().push_back({key, std::move(image)});
-    cache().emplace(key, handle);
-    return handle;
+TextureHandle loadTextureMemory(
+    const std::string& cache_key,
+    const void *data,
+    std::size_t size,
+    std::string *error)
+{
+    if (error) error->clear();
+    if (cache_key.empty()) {
+        if (error) *error = "empty embedded texture cache key";
+        return INVALID_TEXTURE;
+    }
+
+    const auto found = cache().find(cache_key);
+    if (found != cache().end()) return found->second;
+
+    Images::Image image;
+    if (!Images::loadMemory(data, size, &image, error)) return INVALID_TEXTURE;
+    return store(cache_key, std::move(image));
 }
 
 const TextureAsset *texture(TextureHandle handle)
