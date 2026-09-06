@@ -72,6 +72,10 @@ struct BuildResult {
     std::string error;
     std::vector<WideNode> nodes;
     std::vector<Triangle> triangles;
+    // For every triangle in BVH leaf order, index of the corresponding source
+    // triangle supplied to buildWideBvh(). This lets animated meshes refit the
+    // existing topology without rebuilding SAH partitions every frame.
+    std::vector<std::uint32_t> source_order;
     Bounds bounds{};
 };
 
