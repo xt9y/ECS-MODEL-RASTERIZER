@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace Renderer {
 
@@ -31,6 +32,14 @@ public:
     bool giEnabled() const { return gi_.enabled(); }
 
 private:
+    struct SkinCache {
+        std::uint32_t mesh = UINT32_MAX;
+        Ecs::Entity animator = Ecs::INVALID_ENTITY;
+        std::uint64_t pose_revision = 0u;
+        std::vector<Vec3> positions;
+        std::vector<Vec3> normals;
+    };
+
     unsigned int textureFor(std::uint32_t handle);
 
     bool initialized_ = false;
@@ -39,6 +48,7 @@ private:
 
     GI gi_{};
     std::unordered_map<std::uint32_t, unsigned int> textures_;
+    std::unordered_map<Ecs::Entity, SkinCache> skin_cache_;
 };
 
 } // namespace Renderer
