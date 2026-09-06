@@ -90,14 +90,15 @@ struct AnimatorComponent {
     float time = 0.0f;
     float next_time = 0.0f;
     float speed = 1.0f;
+    float next_speed = 1.0f;
     float blend_time = 0.0f;
     float blend_duration = 0.0f;
 
     bool loop = true;
+    bool next_loop = true;
     bool playing = true;
 
     Pose pose;
-    std::vector<Transform> scratch;
 };
 
 struct SkinBindingComponent {
