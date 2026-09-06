@@ -523,6 +523,11 @@ uniform int uUseBvh;
 uniform int uRaysPerPixel;
 layout(rgba16f,binding=0) writeonly uniform image2D uRaw;
 const uint LEAF_BIT=0x80000000u;
+const vec2 POISSON[12]=vec2[12](
+    vec2(-0.326,-0.406),vec2(-0.840,-0.074),vec2(-0.696,0.457),vec2(-0.203,0.621),
+    vec2(0.962,-0.195),vec2(0.473,-0.480),vec2(0.519,0.767),vec2(0.185,-0.893),
+    vec2(0.507,0.064),vec2(0.896,0.412),vec2(-0.322,-0.933),vec2(-0.792,-0.598)
+);
 uint hashUint(uint v){v^=v>>16;v*=0x7feb352du;v^=v>>15;v*=0x846ca68bu;v^=v>>16;return v;}
 float randomFloat(inout uint s){s=hashUint(s);return float(s)*(1.0/4294967296.0);}
 vec3 cosineHemisphere(vec3 n,inout uint s){
@@ -548,21 +553,35 @@ bool traceScene(vec3 o,vec3 d,out float dist,out vec3 n,out vec3 color){
 }
 vec3 reconstructWorld(vec2 uv,float depth){vec4 c=vec4(uv*2.0-1.0,depth*2.0-1.0,1);vec4 w=uInverseViewProjection*c;return w.xyz/max(abs(w.w),1e-8);}
 float shadowVisibility(vec3 p,vec3 n){
-    float ndl=max(dot(n,uLightDirection),0.0);if(ndl<=0.0)return 0.0;vec4 c=uLightViewProjection*vec4(p+n*0.03,1);if(c.w<=0.0)return 1.0;vec3 q=c.xyz/c.w;vec2 uv=q.xy*0.5+0.5;float z=q.z*0.5+0.5;
-    if(z<=0.0||z>=1.0||any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))return 1.0;vec2 texel=1.0/vec2(textureSize(uShadow,0));float bias=0.0007+(1.0-ndl)*0.0025,v=0.0;
-    for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x)v+=z-bias<=texture(uShadow,uv+vec2(x,y)*texel).r?1.0:0.0;return v/9.0;
+    float ndl=max(dot(n,uLightDirection),0.0);if(ndl<=0.0)return 0.0;
+    vec4 c=uLightViewProjection*vec4(p+n*0.025,1.0);if(c.w<=0.0)return 1.0;
+    vec3 q=c.xyz/c.w;vec2 uv=q.xy*0.5+0.5;float z=q.z*0.5+0.5;
+    if(z<=0.0||z>=1.0||any(lessThan(uv,vec2(0.0)))||any(greaterThan(uv,vec2(1.0))))return 1.0;
+    vec2 texel=1.0/vec2(textureSize(uShadow,0));
+    float bias=0.00045+(1.0-ndl)*0.0018;
+    float blockers=0.0,blockerDepth=0.0;
+    float searchRadius=3.5;
+    for(int i=0;i<12;++i){float d=texture(uShadow,uv+POISSON[i]*texel*searchRadius).r;if(d<z-bias){blockerDepth+=d;blockers+=1.0;}}
+    if(blockers<0.5)return 1.0;
+    blockerDepth/=blockers;
+    float separation=max(z-blockerDepth,0.0);
+    float penumbra=clamp(0.9+separation*420.0,0.9,7.0)*(1.0+(1.0-ndl)*0.25);
+    float visibility=0.0;
+    for(int i=0;i<12;++i)visibility+=(z-bias<=texture(uShadow,uv+POISSON[i]*texel*penumbra).r)?1.0:0.0;
+    return visibility/12.0;
 }
 bool screenTrace(vec3 o,vec3 d,out vec2 hitUv){
     for(int step=0;step<16;++step){float t=0.18+float(step*step)*0.055;vec4 c=uViewProjection*vec4(o+d*t,1);if(c.w<=0.0)continue;vec3 ndc=c.xyz/c.w;vec2 uv=ndc.xy*0.5+0.5;if(any(lessThan(uv,vec2(0.002)))||any(greaterThan(uv,vec2(0.998))))return false;float scene=texture(uDepth,uv).r,ray=ndc.z*0.5+0.5,diff=ray-scene;if(scene<0.999999&&diff>0.0006&&diff<0.025){hitUv=uv;return true;}}
     return false;
 }
-vec3 skyRadiance(vec3 d){float e=clamp(d.y*0.5+0.5,0.0,1.0);return mix(vec3(0.025,0.032,0.045),vec3(0.14,0.18,0.25),e);}
+vec3 skyRadiance(vec3 d){float e=clamp(d.y*0.5+0.5,0.0,1.0);return mix(vec3(0.035,0.045,0.065),vec3(0.18,0.23,0.32),e);}
+vec3 localFill(vec3 n){float up=clamp(n.y*0.5+0.5,0.0,1.0);return mix(vec3(0.012,0.015,0.022),vec3(0.040,0.052,0.070),up);}
 void main(){
     ivec2 size=ivec2(uOutputSize),pixel=ivec2(gl_GlobalInvocationID.xy);if(any(greaterThanEqual(pixel,size)))return;vec2 uv=(vec2(pixel)+0.5)/uOutputSize;float depth=texture(uDepth,uv).r;if(depth>=0.999999){imageStore(uRaw,pixel,vec4(0));return;}
     vec3 p=reconstructWorld(uv,depth),n=normalize(texture(uNormal,uv).xyz*2.0-1.0),indirect=vec3(0);int rays=clamp(uRaysPerPixel,1,2);
     for(int s=0;s<rays;++s){uint state=uint(pixel.x)*1973u+uint(pixel.y)*9277u+uint(max(uFrame,0))*26699u+uint(s)*31847u+1u;vec3 ro=p+n*0.04,rd=cosineHemisphere(n,state),radiance=vec3(0);vec2 hitUv;
-        if(uUseScreen!=0&&screenTrace(ro,rd,hitUv)){float hd=texture(uDepth,hitUv).r;vec3 hp=reconstructWorld(hitUv,hd),hn=normalize(texture(uNormal,hitUv).xyz*2.0-1.0),hc=texture(uAlbedo,hitUv).rgb;float direct=max(dot(hn,uLightDirection),0.0)*shadowVisibility(hp,hn);radiance=hc*direct*1.2;}
-        else{float dist;vec3 hn,hc;if(traceScene(ro,rd,dist,hn,hc)){vec3 hp=ro+rd*dist;float direct=max(dot(hn,uLightDirection),0.0)*shadowVisibility(hp,hn);radiance=hc*direct*1.2;}else radiance=skyRadiance(rd);}
+        if(uUseScreen!=0&&screenTrace(ro,rd,hitUv)){float hd=texture(uDepth,hitUv).r;vec3 hp=reconstructWorld(hitUv,hd),hn=normalize(texture(uNormal,hitUv).xyz*2.0-1.0),hc=texture(uAlbedo,hitUv).rgb;float direct=max(dot(hn,uLightDirection),0.0)*shadowVisibility(hp,hn);radiance=hc*(direct*1.15+localFill(hn));}
+        else{float dist;vec3 hn,hc;if(traceScene(ro,rd,dist,hn,hc)){vec3 hp=ro+rd*dist;float direct=max(dot(hn,uLightDirection),0.0)*shadowVisibility(hp,hn);radiance=hc*(direct*1.15+localFill(hn));}else radiance=skyRadiance(rd);}
         indirect+=radiance;
     }
     imageStore(uRaw,pixel,vec4(max(indirect/float(rays),vec3(0)),1));
@@ -626,9 +645,45 @@ uniform mat4 uLightViewProjection;
 uniform vec3 uLightDirection;
 in vec2 vUv;
 layout(location=0) out vec4 outColor;
+const vec2 POISSON[12]=vec2[12](
+    vec2(-0.326,-0.406),vec2(-0.840,-0.074),vec2(-0.696,0.457),vec2(-0.203,0.621),
+    vec2(0.962,-0.195),vec2(0.473,-0.480),vec2(0.519,0.767),vec2(0.185,-0.893),
+    vec2(0.507,0.064),vec2(0.896,0.412),vec2(-0.322,-0.933),vec2(-0.792,-0.598)
+);
 vec3 reconstructWorld(vec2 uv,float depth){vec4 c=vec4(uv*2.0-1.0,depth*2.0-1.0,1);vec4 w=uInverseViewProjection*c;return w.xyz/max(abs(w.w),1e-8);}
-float shadowVisibility(vec3 p,vec3 n){float ndl=max(dot(n,uLightDirection),0.0);if(ndl<=0.0)return 0.0;vec4 c=uLightViewProjection*vec4(p+n*0.03,1);if(c.w<=0.0)return 1.0;vec3 q=c.xyz/c.w;vec2 uv=q.xy*0.5+0.5;float z=q.z*0.5+0.5;if(z<=0.0||z>=1.0||any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))return 1.0;vec2 texel=1.0/vec2(textureSize(uShadow,0));float bias=0.0007+(1.0-ndl)*0.0025,v=0.0;for(int y=-1;y<=1;++y)for(int x=-1;x<=1;++x)v+=z-bias<=texture(uShadow,uv+vec2(x,y)*texel).r?1.0:0.0;return v/9.0;}
-void main(){float depth=texture(uDepth,vUv).r;if(depth>=0.999999){outColor=vec4(0.035,0.035,0.045,1);return;}vec4 albedo=texture(uAlbedo,vUv);vec3 n=normalize(texture(uNormal,vUv).xyz*2.0-1.0),p=reconstructWorld(vUv,depth);float ndl=max(dot(n,uLightDirection),0.0);vec3 direct=vec3(ndl*shadowVisibility(p,n)*1.2);vec3 indirect=max(texture(uIndirect,vUv).rgb,vec3(0));vec3 color=albedo.rgb*(direct+indirect);color=color/(vec3(1)+color);outColor=vec4(color,albedo.a);}
+float shadowVisibility(vec3 p,vec3 n){
+    float ndl=max(dot(n,uLightDirection),0.0);if(ndl<=0.0)return 0.0;
+    vec4 c=uLightViewProjection*vec4(p+n*0.025,1.0);if(c.w<=0.0)return 1.0;
+    vec3 q=c.xyz/c.w;vec2 uv=q.xy*0.5+0.5;float z=q.z*0.5+0.5;
+    if(z<=0.0||z>=1.0||any(lessThan(uv,vec2(0.0)))||any(greaterThan(uv,vec2(1.0))))return 1.0;
+    vec2 texel=1.0/vec2(textureSize(uShadow,0));
+    float bias=0.00045+(1.0-ndl)*0.0018;
+    float blockers=0.0,blockerDepth=0.0;
+    for(int i=0;i<12;++i){float d=texture(uShadow,uv+POISSON[i]*texel*3.5).r;if(d<z-bias){blockerDepth+=d;blockers+=1.0;}}
+    if(blockers<0.5)return 1.0;
+    blockerDepth/=blockers;
+    float penumbra=clamp(0.9+max(z-blockerDepth,0.0)*420.0,0.9,7.0)*(1.0+(1.0-ndl)*0.25);
+    float visibility=0.0;
+    for(int i=0;i<12;++i)visibility+=(z-bias<=texture(uShadow,uv+POISSON[i]*texel*penumbra).r)?1.0:0.0;
+    return visibility/12.0;
+}
+vec3 environmentFill(vec3 n){float up=clamp(n.y*0.5+0.5,0.0,1.0);return mix(vec3(0.014,0.017,0.024),vec3(0.050,0.065,0.090),up);}
+void main(){
+    float depth=texture(uDepth,vUv).r;
+    if(depth>=0.999999){outColor=vec4(0.035,0.035,0.045,1);return;}
+    vec4 albedo=texture(uAlbedo,vUv);
+    vec3 n=normalize(texture(uNormal,vUv).xyz*2.0-1.0);
+    vec3 p=reconstructWorld(vUv,depth);
+    float ndl=max(dot(n,uLightDirection),0.0);
+    float visibility=shadowVisibility(p,n);
+    vec3 direct=vec3(ndl*visibility*1.15);
+    vec3 indirect=max(texture(uIndirect,vUv).rgb,vec3(0.0))*1.45;
+    vec3 lighting=environmentFill(n)+direct+indirect;
+    vec3 color=max(albedo.rgb*lighting,vec3(0.0));
+    color=color/(vec3(1.0)+color);
+    color=pow(color,vec3(1.0/2.2));
+    outColor=vec4(color,albedo.a);
+}
 )GLSL";
 
 } // namespace
@@ -1010,7 +1065,7 @@ struct GI::Impl {
 
     bool createShadow()
     {
-        shadow_depth = createTexture2D(kShadowSize, kShadowSize, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, false);
+        shadow_depth = createTexture2D(kShadowSize, kShadowSize, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT, true);
         if (!shadow_depth) return false;
         GL30.glGenFramebuffers(1, &shadow_framebuffer);
         if (!shadow_framebuffer) return false;
@@ -1062,7 +1117,7 @@ struct GI::Impl {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
         glEnable(GL_POLYGON_OFFSET_FILL);
-        glPolygonOffset(2.0f, 4.0f);
+        glPolygonOffset(1.5f, 3.0f);
         glDisable(GL_BLEND);
         glDisable(GL_TEXTURE_2D);
         glDisable(GL_LIGHTING);
