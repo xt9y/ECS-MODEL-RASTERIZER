@@ -5,268 +5,52 @@ namespace Renderer::WavefrontShaders {
 
 inline constexpr const char *common = R"GLSL(
 #version 430
-const uint LEAF_BIT = 0x80000000u;
-const uint LEAF_FIRST_MASK = 0x00ffffffu;
-const float PI = 3.14159265358979323846;
-const float INF = 1.0e30;
-const float RAY_EPSILON = 0.0025;
-const int WIDE_STACK_DEPTH = 16;
-
-struct WideNode {
-    vec4 base_min; vec4 extent;
-    uvec4 child_ref0; uvec4 child_ref1;
-    uvec4 bounds0_0; uvec4 bounds0_1;
-    uvec4 bounds1_0; uvec4 bounds1_1;
-};
-struct Triangle {
-    vec4 p0; vec4 p1; vec4 p2;
-    vec4 n0; vec4 n1; vec4 n2;
-    vec4 uv01; vec4 uv2;
-};
-struct Material { vec4 base_color; ivec4 data; };
-struct RayData { vec4 origin_pixel; vec4 direction_rng; };
-struct SurfaceData { vec4 position_depth; vec4 normal_material; vec4 uv_source; };
-struct ReservoirData { vec4 sample_position_m; vec4 radiance_weight; };
-struct LightingData { vec4 color; };
-struct CacheEntry { uvec4 header; uvec4 radiance; };
-
-layout(std430, binding = 0) readonly buffer BvhNodes { WideNode bvh_nodes[]; };
-layout(std430, binding = 1) readonly buffer Triangles { Triangle triangles[]; };
-layout(std430, binding = 2) readonly buffer Materials { Material materials[]; };
-uniform int uNodeCount;
-uniform int uMaterialCount;
-uniform vec3 uLightPosition;
-uniform vec3 uLightColor;
-uniform float uLightIntensity;
-uniform int uHasLight;
-uniform uint uFrameIndex;
-uniform sampler2D uTexture0; uniform sampler2D uTexture1;
-uniform sampler2D uTexture2; uniform sampler2D uTexture3;
-uniform sampler2D uTexture4; uniform sampler2D uTexture5;
-uniform sampler2D uTexture6; uniform sampler2D uTexture7;
-uniform sampler2D uTexture8; uniform sampler2D uTexture9;
-uniform sampler2D uTexture10; uniform sampler2D uTexture11;
-uniform sampler2D uTexture12; uniform sampler2D uTexture13;
-uniform sampler2D uTexture14; uniform sampler2D uTexture15;
-
-struct Hit { bool found; float distance; vec3 position; vec3 normal; vec2 uv; uint material; };
-
-uint hashUint(uint value) {
-    value ^= value >> 16; value *= 0x7feb352du;
-    value ^= value >> 15; value *= 0x846ca68bu;
-    value ^= value >> 16; return value;
-}
-float randomFloat(inout uint state) { state = hashUint(state); return float(state) * (1.0 / 4294967296.0); }
-uint childReference(WideNode node, int child) { return child < 4 ? node.child_ref0[child] : node.child_ref1[child - 4]; }
-uint childBounds0(WideNode node, int child) { return child < 4 ? node.bounds0_0[child] : node.bounds0_1[child - 4]; }
-uint childBounds1(WideNode node, int child) { return child < 4 ? node.bounds1_0[child] : node.bounds1_1[child - 4]; }
-
-void decodeChildBounds(WideNode node, int child, out vec3 bmin, out vec3 bmax) {
-    uint p0 = childBounds0(node, child); uint p1 = childBounds1(node, child);
-    vec3 qmin = vec3(float(p0 & 0xffu), float((p0 >> 8u) & 0xffu), float((p0 >> 16u) & 0xffu)) * (1.0 / 255.0);
-    vec3 qmax = vec3(float((p0 >> 24u) & 0xffu), float(p1 & 0xffu), float((p1 >> 8u) & 0xffu)) * (1.0 / 255.0);
-    bmin = node.base_min.xyz + node.extent.xyz * qmin;
-    bmax = node.base_min.xyz + node.extent.xyz * qmax;
-}
-vec3 safeInverse(vec3 direction) {
-    return vec3(abs(direction.x) > 1.0e-10 ? 1.0 / direction.x : 1.0e30,
-                abs(direction.y) > 1.0e-10 ? 1.0 / direction.y : 1.0e30,
-                abs(direction.z) > 1.0e-10 ? 1.0 / direction.z : 1.0e30);
-}
-float aabbEntry(vec3 origin, vec3 inverse_direction, vec3 bmin, vec3 bmax, float maximum_distance) {
-    vec3 t0 = (bmin - origin) * inverse_direction; vec3 t1 = (bmax - origin) * inverse_direction;
-    vec3 near_t = min(t0, t1); vec3 far_t = max(t0, t1);
-    float enter = max(max(near_t.x, near_t.y), max(near_t.z, 0.0));
-    float exit = min(min(far_t.x, far_t.y), far_t.z);
-    return exit >= enter && enter < maximum_distance ? enter : INF;
-}
-bool hitTriangle(vec3 origin, vec3 direction, Triangle triangle, inout float distance, out vec3 barycentric) {
-    vec3 e1 = triangle.p1.xyz - triangle.p0.xyz; vec3 e2 = triangle.p2.xyz - triangle.p0.xyz;
-    vec3 p = cross(direction, e2); float det = dot(e1, p); if (abs(det) < 1.0e-8) return false;
-    float inv_det = 1.0 / det; vec3 offset = origin - triangle.p0.xyz;
-    float u = dot(offset, p) * inv_det; if (u < 0.0 || u > 1.0) return false;
-    vec3 q = cross(offset, e1); float v = dot(direction, q) * inv_det; if (v < 0.0 || u + v > 1.0) return false;
-    float t = dot(e2, q) * inv_det; if (t <= RAY_EPSILON || t >= distance) return false;
-    distance = t; barycentric = vec3(1.0 - u - v, u, v); return true;
-}
-uint childHitMask(WideNode node, vec3 origin, vec3 inverse_direction, float maximum_distance) {
-    uint mask = 0u; int count = clamp(int(node.base_min.w + 0.5), 0, 8);
-    for (int child = 0; child < count; ++child) {
-        vec3 bmin; vec3 bmax; decodeChildBounds(node, child, bmin, bmax);
-        if (aabbEntry(origin, inverse_direction, bmin, bmax, maximum_distance) < INF) mask |= 1u << uint(child);
-    } return mask;
-}
-int nearestChild(WideNode node, uint mask, vec3 origin, vec3 inverse_direction, float maximum_distance) {
-    int best_child = -1; float best_entry = INF;
-    while (mask != 0u) {
-        int child = findLSB(mask); mask &= ~(1u << uint(child));
-        vec3 bmin; vec3 bmax; decodeChildBounds(node, child, bmin, bmax);
-        float entry = aabbEntry(origin, inverse_direction, bmin, bmax, maximum_distance);
-        if (entry < best_entry) { best_entry = entry; best_child = child; }
-    } return best_child;
-}
-
-Hit traceClosest(vec3 origin, vec3 direction, float maximum_distance) {
-    Hit best; best.found = false; best.distance = maximum_distance; best.position = vec3(0.0);
-    best.normal = vec3(0.0, 1.0, 0.0); best.uv = vec2(0.0); best.material = 0u;
-    if (uNodeCount <= 0) return best;
-    vec3 inverse_direction = safeInverse(direction); uvec2 stack[WIDE_STACK_DEPTH]; int stack_size = 0;
-    uint node_index = 0u; WideNode node = bvh_nodes[0]; uint mask = childHitMask(node, origin, inverse_direction, best.distance);
-    for (int guard = 0; guard < 4096; ++guard) {
-        if (mask == 0u) {
-            if (stack_size == 0) break; uvec2 frame = stack[--stack_size]; node_index = frame.x; mask = frame.y; node = bvh_nodes[node_index]; continue;
-        }
-        int child = nearestChild(node, mask, origin, inverse_direction, best.distance);
-        if (child < 0) { mask = 0u; continue; }
-        mask &= ~(1u << uint(child)); uint reference = childReference(node, child);
-        if ((reference & LEAF_BIT) != 0u) {
-            uint first = reference & LEAF_FIRST_MASK; uint count = (reference >> 24u) & 0x7fu;
-            for (uint i = 0u; i < count; ++i) {
-                Triangle triangle = triangles[first + i]; float distance = best.distance; vec3 barycentric;
-                if (!hitTriangle(origin, direction, triangle, distance, barycentric)) continue;
-                best.found = true; best.distance = distance; best.position = origin + direction * distance;
-                vec3 normal = normalize(triangle.n0.xyz * barycentric.x + triangle.n1.xyz * barycentric.y + triangle.n2.xyz * barycentric.z);
-                if (dot(normal, direction) > 0.0) normal = -normal; best.normal = normal;
-                best.uv = triangle.uv01.xy * barycentric.x + triangle.uv01.zw * barycentric.y + triangle.uv2.xy * barycentric.z;
-                best.material = uint(max(triangle.uv2.z, 0.0) + 0.5);
-            }
-        } else if (reference < uint(uNodeCount)) {
-            if (stack_size >= WIDE_STACK_DEPTH) continue;
-            stack[stack_size++] = uvec2(node_index, mask); node_index = reference; node = bvh_nodes[node_index];
-            mask = childHitMask(node, origin, inverse_direction, best.distance);
-        }
-    } return best;
-}
-
-bool traceAny(vec3 origin, vec3 direction, float maximum_distance) {
-    if (uNodeCount <= 0 || maximum_distance <= RAY_EPSILON) return false;
-    vec3 inverse_direction = safeInverse(direction); uvec2 stack[WIDE_STACK_DEPTH]; int stack_size = 0;
-    uint node_index = 0u; WideNode node = bvh_nodes[0]; uint mask = childHitMask(node, origin, inverse_direction, maximum_distance);
-    for (int guard = 0; guard < 2048; ++guard) {
-        if (mask == 0u) {
-            if (stack_size == 0) break; uvec2 frame = stack[--stack_size]; node_index = frame.x; mask = frame.y; node = bvh_nodes[node_index]; continue;
-        }
-        int child = findLSB(mask); mask &= ~(1u << uint(child)); uint reference = childReference(node, child);
-        if ((reference & LEAF_BIT) != 0u) {
-            uint first = reference & LEAF_FIRST_MASK; uint count = (reference >> 24u) & 0x7fu;
-            for (uint i = 0u; i < count; ++i) { float distance = maximum_distance; vec3 barycentric;
-                if (hitTriangle(origin, direction, triangles[first + i], distance, barycentric)) return true; }
-        } else if (reference < uint(uNodeCount)) {
-            if (stack_size >= WIDE_STACK_DEPTH) continue;
-            stack[stack_size++] = uvec2(node_index, mask); node_index = reference; node = bvh_nodes[node_index];
-            mask = childHitMask(node, origin, inverse_direction, maximum_distance);
-        }
-    } return false;
-}
-
-vec4 sampleTextureSlot(int slot, vec2 uv) {
-    vec2 c = vec2(uv.x, 1.0 - uv.y);
-    switch (slot) {
-        case 0:return texture(uTexture0,c); case 1:return texture(uTexture1,c); case 2:return texture(uTexture2,c); case 3:return texture(uTexture3,c);
-        case 4:return texture(uTexture4,c); case 5:return texture(uTexture5,c); case 6:return texture(uTexture6,c); case 7:return texture(uTexture7,c);
-        case 8:return texture(uTexture8,c); case 9:return texture(uTexture9,c); case 10:return texture(uTexture10,c); case 11:return texture(uTexture11,c);
-        case 12:return texture(uTexture12,c); case 13:return texture(uTexture13,c); case 14:return texture(uTexture14,c); case 15:return texture(uTexture15,c);
-        default:return vec4(1.0);
-    }
-}
-vec3 materialAlbedo(uint material_index, vec2 uv) {
-    if (material_index >= uint(max(uMaterialCount,0))) return vec3(1.0); Material material = materials[material_index];
-    vec3 albedo = max(material.base_color.rgb,vec3(0.0)); int slot = material.data.x;
-    if (slot >= 0 && slot < 16) { vec4 texel = sampleTextureSlot(slot,uv); albedo *= pow(max(texel.rgb,vec3(0.0)),vec3(2.2)); }
-    return clamp(albedo,vec3(0.0),vec3(1.0));
-}
-vec3 cosineHemisphere(vec3 normal, inout uint state) {
-    float u1=randomFloat(state), u2=randomFloat(state), r=sqrt(u1), phi=2.0*PI*u2;
-    vec3 local=vec3(r*cos(phi),r*sin(phi),sqrt(max(0.0,1.0-u1)));
-    vec3 helper=abs(normal.z)<0.999?vec3(0,0,1):vec3(1,0,0); vec3 tangent=normalize(cross(helper,normal));
-    return normalize(tangent*local.x+cross(normal,tangent)*local.y+normal*local.z);
-}
-vec3 pointLight(vec3 position, vec3 normal, vec3 albedo) {
-    if (uHasLight==0 || uLightIntensity<=0.0) return vec3(0.0); vec3 to_light=uLightPosition-position;
-    float d2=max(dot(to_light,to_light),1.0e-4), d=sqrt(d2); vec3 direction=to_light/d; float cosine=max(dot(normal,direction),0.0);
-    if (cosine<=0.0) return vec3(0.0); vec3 shadow_origin=position+normal*RAY_EPSILON*4.0;
-    if (traceAny(shadow_origin,direction,max(d-RAY_EPSILON*8.0,0.0))) return vec3(0.0);
-    return albedo*max(uLightColor,vec3(0.0))*max(uLightIntensity,0.0)/d2*(cosine/PI);
-}
+const uint LEAF_BIT=0x80000000u,LEAF_FIRST_MASK=0x00ffffffu;const float PI=3.14159265358979323846,INF=1.0e30,RAY_EPSILON=0.0025;const int WIDE_STACK_DEPTH=16;
+struct WideNode{vec4 base_min;vec4 extent;uvec4 child_ref0;uvec4 child_ref1;uvec4 bounds0_0;uvec4 bounds0_1;uvec4 bounds1_0;uvec4 bounds1_1;};
+struct Triangle{vec4 p0;vec4 p1;vec4 p2;vec4 n0;vec4 n1;vec4 n2;vec4 uv01;vec4 uv2;};
+struct Material{vec4 base_color;ivec4 data;};struct RayData{vec4 origin_pixel;vec4 direction_rng;};struct SurfaceData{vec4 position_depth;vec4 normal_material;vec4 uv_source;};struct ReservoirData{vec4 sample_position_m;vec4 radiance_weight;};struct LightingData{vec4 color;};struct CacheEntry{uvec4 header;uvec4 radiance;};
+layout(std430,binding=0)readonly buffer BvhNodes{WideNode bvh_nodes[];};layout(std430,binding=1)readonly buffer Triangles{Triangle triangles[];};layout(std430,binding=2)readonly buffer Materials{Material materials[];};
+uniform int uNodeCount,uMaterialCount,uHasLight,uFrameIndex;uniform vec3 uLightPosition,uLightColor;uniform float uLightIntensity;
+uniform sampler2D uTexture0,uTexture1,uTexture2,uTexture3,uTexture4,uTexture5,uTexture6,uTexture7,uTexture8,uTexture9,uTexture10,uTexture11,uTexture12,uTexture13,uTexture14,uTexture15;
+struct Hit{bool found;float distance;vec3 position;vec3 normal;vec2 uv;uint material;};
+uint hashUint(uint v){v^=v>>16;v*=0x7feb352du;v^=v>>15;v*=0x846ca68bu;v^=v>>16;return v;}float randomFloat(inout uint s){s=hashUint(s);return float(s)*(1.0/4294967296.0);}
+uint childReference(WideNode n,int c){return c<4?n.child_ref0[c]:n.child_ref1[c-4];}uint childBounds0(WideNode n,int c){return c<4?n.bounds0_0[c]:n.bounds0_1[c-4];}uint childBounds1(WideNode n,int c){return c<4?n.bounds1_0[c]:n.bounds1_1[c-4];}
+void decodeChildBounds(WideNode n,int c,out vec3 mn,out vec3 mx){uint p0=childBounds0(n,c),p1=childBounds1(n,c);vec3 qn=vec3(float(p0&255u),float((p0>>8u)&255u),float((p0>>16u)&255u))/255.0;vec3 qx=vec3(float((p0>>24u)&255u),float(p1&255u),float((p1>>8u)&255u))/255.0;mn=n.base_min.xyz+n.extent.xyz*qn;mx=n.base_min.xyz+n.extent.xyz*qx;}
+vec3 safeInverse(vec3 d){return vec3(abs(d.x)>1e-10?1.0/d.x:1e30,abs(d.y)>1e-10?1.0/d.y:1e30,abs(d.z)>1e-10?1.0/d.z:1e30);}float aabbEntry(vec3 o,vec3 id,vec3 mn,vec3 mx,float md){vec3 t0=(mn-o)*id,t1=(mx-o)*id,n=min(t0,t1),f=max(t0,t1);float e=max(max(n.x,n.y),max(n.z,0.0)),x=min(min(f.x,f.y),f.z);return x>=e&&e<md?e:INF;}
+bool hitTriangle(vec3 o,vec3 d,Triangle t,inout float dist,out vec3 b){vec3 e1=t.p1.xyz-t.p0.xyz,e2=t.p2.xyz-t.p0.xyz,p=cross(d,e2);float det=dot(e1,p);if(abs(det)<1e-8)return false;float inv=1.0/det;vec3 off=o-t.p0.xyz;float u=dot(off,p)*inv;if(u<0||u>1)return false;vec3 q=cross(off,e1);float v=dot(d,q)*inv;if(v<0||u+v>1)return false;float h=dot(e2,q)*inv;if(h<=RAY_EPSILON||h>=dist)return false;dist=h;b=vec3(1-u-v,u,v);return true;}
+uint childHitMask(WideNode n,vec3 o,vec3 id,float md){uint mask=0u;int count=clamp(int(n.base_min.w+0.5),0,8);for(int c=0;c<count;++c){vec3 mn,mx;decodeChildBounds(n,c,mn,mx);if(aabbEntry(o,id,mn,mx,md)<INF)mask|=1u<<uint(c);}return mask;}int nearestChild(WideNode n,uint mask,vec3 o,vec3 id,float md){int bc=-1;float be=INF;while(mask!=0u){int c=findLSB(mask);mask&=~(1u<<uint(c));vec3 mn,mx;decodeChildBounds(n,c,mn,mx);float e=aabbEntry(o,id,mn,mx,md);if(e<be){be=e;bc=c;}}return bc;}
+Hit traceClosest(vec3 o,vec3 d,float md){Hit best;best.found=false;best.distance=md;best.position=vec3(0);best.normal=vec3(0,1,0);best.uv=vec2(0);best.material=0u;if(uNodeCount<=0)return best;vec3 id=safeInverse(d);uvec2 stack[WIDE_STACK_DEPTH];int sp=0;uint ni=0u;WideNode n=bvh_nodes[0];uint mask=childHitMask(n,o,id,best.distance);for(int guard=0;guard<4096;++guard){if(mask==0u){if(sp==0)break;uvec2 f=stack[--sp];ni=f.x;mask=f.y;n=bvh_nodes[ni];continue;}int c=nearestChild(n,mask,o,id,best.distance);if(c<0){mask=0u;continue;}mask&=~(1u<<uint(c));uint ref=childReference(n,c);if((ref&LEAF_BIT)!=0u){uint first=ref&LEAF_FIRST_MASK,count=(ref>>24u)&0x7fu;for(uint i=0u;i<count;++i){Triangle t=triangles[first+i];float dist=best.distance;vec3 b;if(!hitTriangle(o,d,t,dist,b))continue;best.found=true;best.distance=dist;best.position=o+d*dist;vec3 normal=normalize(t.n0.xyz*b.x+t.n1.xyz*b.y+t.n2.xyz*b.z);if(dot(normal,d)>0)normal=-normal;best.normal=normal;best.uv=t.uv01.xy*b.x+t.uv01.zw*b.y+t.uv2.xy*b.z;best.material=uint(max(t.uv2.z,0.0)+0.5);}}else if(ref<uint(uNodeCount)){if(sp>=WIDE_STACK_DEPTH)continue;stack[sp++]=uvec2(ni,mask);ni=ref;n=bvh_nodes[ni];mask=childHitMask(n,o,id,best.distance);}}return best;}
+bool traceAny(vec3 o,vec3 d,float md){if(uNodeCount<=0||md<=RAY_EPSILON)return false;vec3 id=safeInverse(d);uvec2 stack[WIDE_STACK_DEPTH];int sp=0;uint ni=0u;WideNode n=bvh_nodes[0];uint mask=childHitMask(n,o,id,md);for(int guard=0;guard<2048;++guard){if(mask==0u){if(sp==0)break;uvec2 f=stack[--sp];ni=f.x;mask=f.y;n=bvh_nodes[ni];continue;}int c=findLSB(mask);mask&=~(1u<<uint(c));uint ref=childReference(n,c);if((ref&LEAF_BIT)!=0u){uint first=ref&LEAF_FIRST_MASK,count=(ref>>24u)&0x7fu;for(uint i=0u;i<count;++i){float dist=md;vec3 b;if(hitTriangle(o,d,triangles[first+i],dist,b))return true;}}else if(ref<uint(uNodeCount)){if(sp>=WIDE_STACK_DEPTH)continue;stack[sp++]=uvec2(ni,mask);ni=ref;n=bvh_nodes[ni];mask=childHitMask(n,o,id,md);}}return false;}
+vec4 sampleTextureSlot(int s,vec2 uv){vec2 c=vec2(uv.x,1.0-uv.y);switch(s){case 0:return texture(uTexture0,c);case 1:return texture(uTexture1,c);case 2:return texture(uTexture2,c);case 3:return texture(uTexture3,c);case 4:return texture(uTexture4,c);case 5:return texture(uTexture5,c);case 6:return texture(uTexture6,c);case 7:return texture(uTexture7,c);case 8:return texture(uTexture8,c);case 9:return texture(uTexture9,c);case 10:return texture(uTexture10,c);case 11:return texture(uTexture11,c);case 12:return texture(uTexture12,c);case 13:return texture(uTexture13,c);case 14:return texture(uTexture14,c);case 15:return texture(uTexture15,c);default:return vec4(1);}}
+vec3 materialAlbedo(uint mi,vec2 uv){if(mi>=uint(max(uMaterialCount,0)))return vec3(1);Material m=materials[mi];vec3 a=max(m.base_color.rgb,vec3(0));int s=m.data.x;if(s>=0&&s<16){vec4 t=sampleTextureSlot(s,uv);a*=pow(max(t.rgb,vec3(0)),vec3(2.2));}return clamp(a,vec3(0),vec3(1));}
+vec3 cosineHemisphere(vec3 n,inout uint st){float u1=randomFloat(st),u2=randomFloat(st),r=sqrt(u1),p=2.0*PI*u2;vec3 l=vec3(r*cos(p),r*sin(p),sqrt(max(0.0,1.0-u1)));vec3 h=abs(n.z)<0.999?vec3(0,0,1):vec3(1,0,0),t=normalize(cross(h,n));return normalize(t*l.x+cross(n,t)*l.y+n*l.z);}
+vec3 pointLight(vec3 p,vec3 n,vec3 a){if(uHasLight==0||uLightIntensity<=0)return vec3(0);vec3 tl=uLightPosition-p;float d2=max(dot(tl,tl),1e-4),d=sqrt(d2);vec3 ld=tl/d;float c=max(dot(n,ld),0.0);if(c<=0)return vec3(0);if(traceAny(p+n*RAY_EPSILON*4.0,ld,max(d-RAY_EPSILON*8.0,0.0)))return vec3(0);return a*max(uLightColor,vec3(0))*max(uLightIntensity,0.0)/d2*(c/PI);}
 )GLSL";
 
-inline constexpr const char *primary_generate = R"GLSL(
-layout(local_size_x=8,local_size_y=8) in;
-layout(std430,binding=3) writeonly buffer PrimaryRays { RayData primary_rays[]; };
-uniform ivec2 uResolution; uniform vec3 uCameraPosition; uniform vec3 uCameraForward; uniform vec3 uCameraRight; uniform vec3 uCameraUp;
-uniform float uTanHalfFov; uniform float uAspect;
-void main(){ ivec2 pixel=ivec2(gl_GlobalInvocationID.xy); if(any(greaterThanEqual(pixel,uResolution)))return;
- uint index=uint(pixel.y*uResolution.x+pixel.x); uint state=hashUint(index*9781u^uFrameIndex*6271u^0x68bc21ebu);
- vec2 jitter=vec2(randomFloat(state),randomFloat(state))-0.5; vec2 uv=(vec2(pixel)+0.5+jitter)/vec2(uResolution); vec2 ndc=uv*2.0-1.0;
- vec3 direction=normalize(uCameraForward+uCameraRight*(ndc.x*uAspect*uTanHalfFov)+uCameraUp*(ndc.y*uTanHalfFov));
- RayData ray; ray.origin_pixel=vec4(uCameraPosition,uintBitsToFloat(index)); ray.direction_rng=vec4(direction,uintBitsToFloat(state)); primary_rays[index]=ray; }
+inline constexpr const char *primary_generate=R"GLSL(
+layout(local_size_x=8,local_size_y=8)in;layout(std430,binding=3)writeonly buffer PrimaryRays{RayData primary_rays[];};uniform int uResolutionX,uResolutionY;uniform vec3 uCameraPosition,uCameraForward,uCameraRight,uCameraUp;uniform float uTanHalfFov,uAspect;
+void main(){ivec2 res=ivec2(uResolutionX,uResolutionY),pixel=ivec2(gl_GlobalInvocationID.xy);if(any(greaterThanEqual(pixel,res)))return;uint index=uint(pixel.y*res.x+pixel.x),state=hashUint(index*9781u^uint(uFrameIndex)*6271u^0x68bc21ebu);vec2 jitter=vec2(randomFloat(state),randomFloat(state))-0.5,uv=(vec2(pixel)+0.5+jitter)/vec2(res),ndc=uv*2.0-1.0;vec3 d=normalize(uCameraForward+uCameraRight*(ndc.x*uAspect*uTanHalfFov)+uCameraUp*(ndc.y*uTanHalfFov));RayData r;r.origin_pixel=vec4(uCameraPosition,uintBitsToFloat(index));r.direction_rng=vec4(d,uintBitsToFloat(state));primary_rays[index]=r;}
 )GLSL";
-
-inline constexpr const char *primary_intersect = R"GLSL(
-layout(local_size_x=64) in;
-layout(std430,binding=3) readonly buffer PrimaryRays { RayData primary_rays[]; };
-layout(std430,binding=4) writeonly buffer PrimarySurfaces { SurfaceData primary_surfaces[]; };
-layout(std430,binding=5) writeonly buffer HitQueue { uint hit_queue[]; };
-layout(std430,binding=6) buffer QueueCounters { uint hit_count; uint bounce_count; uint qpad0; uint qpad1; };
-layout(std430,binding=7) writeonly buffer InitialReservoirs { ReservoirData initial_reservoirs[]; };
-uniform uint uPixelCount;
-void main(){ uint index=gl_GlobalInvocationID.x; if(index>=uPixelCount)return; RayData ray=primary_rays[index];
- Hit hit=traceClosest(ray.origin_pixel.xyz,ray.direction_rng.xyz,INF); SurfaceData s; s.position_depth=vec4(0,0,0,-1); s.normal_material=vec4(0,1,0,0); s.uv_source=vec4(0);
- ReservoirData empty_r; empty_r.sample_position_m=vec4(0); empty_r.radiance_weight=vec4(0); initial_reservoirs[index]=empty_r;
- if(hit.found){s.position_depth=vec4(hit.position,hit.distance);s.normal_material=vec4(hit.normal,float(hit.material));s.uv_source=vec4(hit.uv,0,0);
- uint q=atomicAdd(hit_count,1u); if(q<uPixelCount)hit_queue[q]=index;} primary_surfaces[index]=s; }
+inline constexpr const char *primary_intersect=R"GLSL(
+layout(local_size_x=64)in;layout(std430,binding=3)readonly buffer PrimaryRays{RayData primary_rays[];};layout(std430,binding=4)writeonly buffer PrimarySurfaces{SurfaceData primary_surfaces[];};layout(std430,binding=5)writeonly buffer HitQueue{uint hit_queue[];};layout(std430,binding=6)buffer QueueCounters{uint hit_count;uint bounce_count;uint qpad0;uint qpad1;};layout(std430,binding=7)writeonly buffer InitialReservoirs{ReservoirData initial_reservoirs[];};uniform int uPixelCount;
+void main(){uint index=gl_GlobalInvocationID.x;if(index>=uint(max(uPixelCount,0)))return;RayData r=primary_rays[index];Hit h=traceClosest(r.origin_pixel.xyz,r.direction_rng.xyz,INF);SurfaceData s;s.position_depth=vec4(0,0,0,-1);s.normal_material=vec4(0,1,0,0);s.uv_source=vec4(0);ReservoirData e;e.sample_position_m=vec4(0);e.radiance_weight=vec4(0);initial_reservoirs[index]=e;if(h.found){s.position_depth=vec4(h.position,h.distance);s.normal_material=vec4(h.normal,float(h.material));s.uv_source=vec4(h.uv,0,0);uint q=atomicAdd(hit_count,1u);if(q<uint(uPixelCount))hit_queue[q]=index;}primary_surfaces[index]=s;}
 )GLSL";
-
-inline constexpr const char *prepare_dispatch = R"GLSL(
-layout(local_size_x=1) in;
-layout(std430,binding=3) readonly buffer QueueCounters { uint hit_count; uint bounce_count; uint qpad0; uint qpad1; };
-layout(std430,binding=4) writeonly buffer DispatchCommands { uvec4 hit_dispatch; uvec4 bounce_dispatch; };
-void main(){hit_dispatch=uvec4((hit_count+63u)/64u,1u,1u,0u);bounce_dispatch=uvec4((bounce_count+63u)/64u,1u,1u,0u);}
+inline constexpr const char *prepare_dispatch=R"GLSL(
+layout(local_size_x=1)in;layout(std430,binding=3)readonly buffer QueueCounters{uint hit_count;uint bounce_count;uint qpad0;uint qpad1;};layout(std430,binding=4)writeonly buffer DispatchCommands{uvec4 hit_dispatch;uvec4 bounce_dispatch;};void main(){hit_dispatch=uvec4((hit_count+63u)/64u,1,1,0);bounce_dispatch=uvec4((bounce_count+63u)/64u,1,1,0);}
 )GLSL";
-
-inline constexpr const char *primary_shade = R"GLSL(
-layout(local_size_x=64) in;
-layout(std430,binding=3) readonly buffer HitQueue { uint hit_queue[]; };
-layout(std430,binding=4) readonly buffer PrimarySurfaces { SurfaceData primary_surfaces[]; };
-layout(std430,binding=5) writeonly buffer BounceRays { RayData bounce_rays[]; };
-layout(std430,binding=6) buffer QueueCounters { uint hit_count; uint bounce_count; uint qpad0; uint qpad1; };
-layout(std430,binding=7) writeonly buffer DirectLighting { LightingData direct_lighting[]; };
-uniform uint uPixelCount;
-void main(){uint qi=gl_GlobalInvocationID.x;if(qi>=hit_count)return;uint pixel=hit_queue[qi];if(pixel>=uPixelCount)return;SurfaceData s=primary_surfaces[pixel];
- uint material=uint(max(s.normal_material.w,0.0)+0.5);vec3 albedo=materialAlbedo(material,s.uv_source.xy);direct_lighting[pixel].color=vec4(pointLight(s.position_depth.xyz,s.normal_material.xyz,albedo),1.0);
- uint state=hashUint(pixel*9781u^uFrameIndex*7919u^0xa511e9b3u);RayData bounce;bounce.origin_pixel=vec4(s.position_depth.xyz+s.normal_material.xyz*RAY_EPSILON*4.0,uintBitsToFloat(pixel));
- bounce.direction_rng=vec4(cosineHemisphere(s.normal_material.xyz,state),uintBitsToFloat(state));uint out_index=atomicAdd(bounce_count,1u);if(out_index<uPixelCount)bounce_rays[out_index]=bounce;}
+inline constexpr const char *primary_shade=R"GLSL(
+layout(local_size_x=64)in;layout(std430,binding=3)readonly buffer HitQueue{uint hit_queue[];};layout(std430,binding=4)readonly buffer PrimarySurfaces{SurfaceData primary_surfaces[];};layout(std430,binding=5)writeonly buffer BounceRays{RayData bounce_rays[];};layout(std430,binding=6)buffer QueueCounters{uint hit_count;uint bounce_count;uint qpad0;uint qpad1;};layout(std430,binding=7)writeonly buffer DirectLighting{LightingData direct_lighting[];};uniform int uPixelCount;
+void main(){uint qi=gl_GlobalInvocationID.x;if(qi>=hit_count)return;uint pixel=hit_queue[qi];if(pixel>=uint(max(uPixelCount,0)))return;SurfaceData s=primary_surfaces[pixel];uint m=uint(max(s.normal_material.w,0.0)+0.5);vec3 a=materialAlbedo(m,s.uv_source.xy);direct_lighting[pixel].color=vec4(pointLight(s.position_depth.xyz,s.normal_material.xyz,a),1);uint st=hashUint(pixel*9781u^uint(uFrameIndex)*7919u^0xa511e9b3u);RayData b;b.origin_pixel=vec4(s.position_depth.xyz+s.normal_material.xyz*RAY_EPSILON*4.0,uintBitsToFloat(pixel));b.direction_rng=vec4(cosineHemisphere(s.normal_material.xyz,st),uintBitsToFloat(st));uint oi=atomicAdd(bounce_count,1u);if(oi<uint(uPixelCount))bounce_rays[oi]=b;}
 )GLSL";
-
-inline constexpr const char *bounce_intersect = R"GLSL(
-layout(local_size_x=64) in;
-layout(std430,binding=3) readonly buffer BounceRays { RayData bounce_rays[]; };
-layout(std430,binding=4) writeonly buffer SecondarySurfaces { SurfaceData secondary_surfaces[]; };
-layout(std430,binding=5) readonly buffer QueueCounters { uint hit_count; uint bounce_count; uint qpad0; uint qpad1; };
-uniform uint uPixelCount;
-void main(){uint index=gl_GlobalInvocationID.x;if(index>=bounce_count||index>=uPixelCount)return;RayData ray=bounce_rays[index];uint pixel=floatBitsToUint(ray.origin_pixel.w);
- Hit hit=traceClosest(ray.origin_pixel.xyz,ray.direction_rng.xyz,INF);SurfaceData s;s.position_depth=vec4(0,0,0,-1);s.normal_material=vec4(0,1,0,0);s.uv_source=vec4(0,0,float(pixel),0);
- if(hit.found){s.position_depth=vec4(hit.position,hit.distance);s.normal_material=vec4(hit.normal,float(hit.material));s.uv_source=vec4(hit.uv,float(pixel),0);}secondary_surfaces[index]=s;}
+inline constexpr const char *bounce_intersect=R"GLSL(
+layout(local_size_x=64)in;layout(std430,binding=3)readonly buffer BounceRays{RayData bounce_rays[];};layout(std430,binding=4)writeonly buffer SecondarySurfaces{SurfaceData secondary_surfaces[];};layout(std430,binding=5)readonly buffer QueueCounters{uint hit_count;uint bounce_count;uint qpad0;uint qpad1;};uniform int uPixelCount;
+void main(){uint i=gl_GlobalInvocationID.x;if(i>=bounce_count||i>=uint(max(uPixelCount,0)))return;RayData r=bounce_rays[i];uint pixel=floatBitsToUint(r.origin_pixel.w);Hit h=traceClosest(r.origin_pixel.xyz,r.direction_rng.xyz,INF);SurfaceData s;s.position_depth=vec4(0,0,0,-1);s.normal_material=vec4(0,1,0,0);s.uv_source=vec4(0,0,float(pixel),0);if(h.found){s.position_depth=vec4(h.position,h.distance);s.normal_material=vec4(h.normal,float(h.material));s.uv_source=vec4(h.uv,float(pixel),0);}secondary_surfaces[i]=s;}
 )GLSL";
-
-inline constexpr const char *bounce_shade = R"GLSL(
-layout(local_size_x=64) in;
-layout(std430,binding=3) readonly buffer SecondarySurfaces { SurfaceData secondary_surfaces[]; };
-layout(std430,binding=4) readonly buffer PrimarySurfaces { SurfaceData primary_surfaces[]; };
-layout(std430,binding=5) buffer InitialReservoirs { ReservoirData initial_reservoirs[]; };
-layout(std430,binding=6) buffer RadianceCache { CacheEntry cache_entries[]; };
-layout(std430,binding=7) readonly buffer QueueCounters { uint hit_count; uint bounce_count; uint qpad0; uint qpad1; };
-uniform uint uPixelCount;uniform uint uCacheSize;
-uint cacheKey(vec3 p,vec3 n){ivec3 cell=ivec3(floor(p*0.5));uint nb=(n.x>=0?1u:0u)|(n.y>=0?2u:0u)|(n.z>=0?4u:0u);return hashUint(uint(cell.x)*73856093u^uint(cell.y)*19349663u^uint(cell.z)*83492791u^nb*2654435761u)|1u;}
-vec3 cacheQuery(vec3 p,vec3 n){if(uCacheSize==0u)return vec3(0);uint key=cacheKey(p,n),start=key%uCacheSize;for(uint probe=0u;probe<4u;++probe){uint i=(start+probe)%uCacheSize;CacheEntry e=cache_entries[i];if(e.header.x==key&&e.header.y>0u)return vec3(e.radiance.xyz)/(1024.0*float(e.header.y));if(e.header.x==0u)break;}return vec3(0);}
-void cacheUpdate(vec3 p,vec3 n,vec3 r){if(uCacheSize==0u)return;uint key=cacheKey(p,n),start=key%uCacheSize;uvec3 fixed=uvec3(clamp(r,vec3(0),vec3(64))*1024.0+0.5);for(uint probe=0u;probe<4u;++probe){uint i=(start+probe)%uCacheSize;uint existing=atomicCompSwap(cache_entries[i].header.x,0u,key);if(existing==0u||existing==key){uint count=atomicAdd(cache_entries[i].header.y,1u);if(count<65535u){atomicAdd(cache_entries[i].radiance.x,fixed.x);atomicAdd(cache_entries[i].radiance.y,fixed.y);atomicAdd(cache_entries[i].radiance.z,fixed.z);}return;}}}
-void main(){uint index=gl_GlobalInvocationID.x;if(index>=bounce_count||index>=uPixelCount)return;SurfaceData secondary=secondary_surfaces[index];uint pixel=uint(max(secondary.uv_source.z,0.0)+0.5);if(pixel>=uPixelCount)return;
- ReservoirData reservoir;reservoir.sample_position_m=vec4(0);reservoir.radiance_weight=vec4(0);if(secondary.position_depth.w>0.0){uint sm=uint(max(secondary.normal_material.w,0.0)+0.5);vec3 sa=materialAlbedo(sm,secondary.uv_source.xy);
- vec3 direct=pointLight(secondary.position_depth.xyz,secondary.normal_material.xyz,sa);vec3 cached=cacheQuery(secondary.position_depth.xyz,secondary.normal_material.xyz);vec3 outgoing=direct+cached*sa;cacheUpdate(secondary.position_depth.xyz,secondary.normal_material.xyz,direct);
- SurfaceData primary=primary_surfaces[pixel];uint pm=uint(max(primary.normal_material.w,0.0)+0.5);vec3 pa=materialAlbedo(pm,primary.uv_source.xy);vec3 contribution=pa*outgoing;float target=max(dot(contribution,vec3(0.2126,0.7152,0.0722)),1.0e-6);
- reservoir.sample_position_m=vec4(secondary.position_depth.xyz,1.0);reservoir.radiance_weight=vec4(contribution,target);}initial_reservoirs[pixel]=reservoir;}
+inline constexpr const char *bounce_shade=R"GLSL(
+layout(local_size_x=64)in;layout(std430,binding=3)readonly buffer SecondarySurfaces{SurfaceData secondary_surfaces[];};layout(std430,binding=4)readonly buffer PrimarySurfaces{SurfaceData primary_surfaces[];};layout(std430,binding=5)buffer InitialReservoirs{ReservoirData initial_reservoirs[];};layout(std430,binding=6)buffer RadianceCache{CacheEntry cache_entries[];};layout(std430,binding=7)readonly buffer QueueCounters{uint hit_count;uint bounce_count;uint qpad0;uint qpad1;};uniform int uPixelCount,uCacheSize;
+uint cacheKey(vec3 p,vec3 n){ivec3 c=ivec3(floor(p*0.5));uint nb=(n.x>=0?1u:0u)|(n.y>=0?2u:0u)|(n.z>=0?4u:0u);return hashUint(uint(c.x)*73856093u^uint(c.y)*19349663u^uint(c.z)*83492791u^nb*2654435761u)|1u;}vec3 cacheQuery(vec3 p,vec3 n){uint size=uint(max(uCacheSize,0));if(size==0u)return vec3(0);uint key=cacheKey(p,n),start=key%size;for(uint probe=0u;probe<4u;++probe){uint i=(start+probe)%size;CacheEntry e=cache_entries[i];if(e.header.x==key&&e.header.y>0u)return vec3(e.radiance.xyz)/(1024.0*float(e.header.y));if(e.header.x==0u)break;}return vec3(0);}void cacheUpdate(vec3 p,vec3 n,vec3 r){uint size=uint(max(uCacheSize,0));if(size==0u)return;uint key=cacheKey(p,n),start=key%size;uvec3 fixed=uvec3(clamp(r,vec3(0),vec3(64))*1024.0+0.5);for(uint probe=0u;probe<4u;++probe){uint i=(start+probe)%size;uint existing=atomicCompSwap(cache_entries[i].header.x,0u,key);if(existing==0u||existing==key){uint count=atomicAdd(cache_entries[i].header.y,1u);if(count<65535u){atomicAdd(cache_entries[i].radiance.x,fixed.x);atomicAdd(cache_entries[i].radiance.y,fixed.y);atomicAdd(cache_entries[i].radiance.z,fixed.z);}return;}}}
+void main(){uint i=gl_GlobalInvocationID.x;if(i>=bounce_count||i>=uint(max(uPixelCount,0)))return;SurfaceData s=secondary_surfaces[i];uint pixel=uint(max(s.uv_source.z,0.0)+0.5);if(pixel>=uint(uPixelCount))return;ReservoirData r;r.sample_position_m=vec4(0);r.radiance_weight=vec4(0);if(s.position_depth.w>0){uint sm=uint(max(s.normal_material.w,0.0)+0.5);vec3 sa=materialAlbedo(sm,s.uv_source.xy),direct=pointLight(s.position_depth.xyz,s.normal_material.xyz,sa),cached=cacheQuery(s.position_depth.xyz,s.normal_material.xyz),outgoing=direct+cached*sa;cacheUpdate(s.position_depth.xyz,s.normal_material.xyz,direct);SurfaceData p=primary_surfaces[pixel];uint pm=uint(max(p.normal_material.w,0.0)+0.5);vec3 contribution=materialAlbedo(pm,p.uv_source.xy)*outgoing;float target=max(dot(contribution,vec3(0.2126,0.7152,0.0722)),1e-6);r.sample_position_m=vec4(s.position_depth.xyz,1);r.radiance_weight=vec4(contribution,target);}initial_reservoirs[pixel]=r;}
 )GLSL";
 
 } // namespace Renderer::WavefrontShaders
-
 #endif
