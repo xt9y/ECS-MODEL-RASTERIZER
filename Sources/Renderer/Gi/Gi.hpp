@@ -25,6 +25,8 @@ struct GiSettings {
 
 class GI {
 public:
+    struct Impl;
+
     GI();
     ~GI();
 
@@ -48,7 +50,6 @@ public:
     const GiSettings& settings() const;
 
 private:
-    struct Impl;
     Impl *impl_;
 };
 
