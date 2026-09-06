@@ -2,6 +2,7 @@
 #define RW_ENGINE_RENDER_HPP
 
 #include "Ecs/Ecs.hpp"
+#include "Renderer/Components.hpp"
 #include "Renderer/Gi/Gi.hpp"
 
 #include <cstdint>
