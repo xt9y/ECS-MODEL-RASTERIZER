@@ -13,12 +13,13 @@ struct CacheEntry {
 };
 
 layout(std430, binding = 0) buffer RadianceCache { CacheEntry cache_entries[]; };
-uniform uint uCacheSize;
+uniform int uCacheSize;
 
 void main()
 {
     uint index = gl_GlobalInvocationID.x;
-    if (index >= uCacheSize) return;
+    uint size = uint(max(uCacheSize, 0));
+    if (index >= size) return;
     cache_entries[index].header = uvec4(0u);
     cache_entries[index].radiance = uvec4(0u);
 }
