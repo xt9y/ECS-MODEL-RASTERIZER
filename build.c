@@ -49,6 +49,17 @@ void build(C_Build *b)
     c_sources(library, "Sources/*/*.cpp");
     c_sources(library, "Sources/*/*/*.cpp");
 
+    C_Dependency *ufbx = c_git(
+        b,
+        "ufbx",
+        "https://github.com/ufbx/ufbx.git",
+        "v0.23.0"
+    );
+    c_dep_source(ufbx);
+    c_dep_include(ufbx, ".");
+    c_dep_sources(ufbx, "ufbx.c");
+    c_use(library, ufbx);
+
     c_flag(library, "-std=c++20");
     configureLibrary(library);
     c_default_target(b, library);
