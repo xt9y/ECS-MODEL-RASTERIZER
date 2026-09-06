@@ -14,7 +14,7 @@ struct GiSettings {
     bool enabled = true;
     bool screen_space_first = true;
     bool bvh_fallback = true;
-    bool surface_cache = true;
+    bool surface_cache = false;
     bool temporal_reuse = true;
     bool denoise = true;
 
