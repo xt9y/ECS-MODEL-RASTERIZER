@@ -10,7 +10,7 @@
 namespace Renderer {
 
 struct LightingDefaults {
-    static constexpr float scene_ambient = 0.02f;
+    static constexpr float scene_ambient = 0.0f;
     static constexpr float direct_diffuse = 1.0f;
 };
 
