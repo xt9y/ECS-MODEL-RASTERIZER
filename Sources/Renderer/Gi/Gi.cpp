@@ -8,12 +8,11 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 #ifndef GL_COLOR_ATTACHMENT1
@@ -22,23 +21,14 @@
 #ifndef GL_COLOR_ATTACHMENT2
 #define GL_COLOR_ATTACHMENT2 0x8CE2
 #endif
-#ifndef GL_COLOR_ATTACHMENT3
-#define GL_COLOR_ATTACHMENT3 0x8CE3
-#endif
 #ifndef GL_RGBA8
 #define GL_RGBA8 0x8058
 #endif
 #ifndef GL_RG16F
 #define GL_RG16F 0x822F
 #endif
-#ifndef GL_R16F
-#define GL_R16F 0x822D
-#endif
 #ifndef GL_RG
 #define GL_RG 0x8227
-#endif
-#ifndef GL_RED
-#define GL_RED 0x1903
 #endif
 #ifndef GL_DEPTH_COMPONENT32F
 #define GL_DEPTH_COMPONENT32F 0x8CAC
@@ -62,32 +52,32 @@ struct Vec3 {
 };
 
 constexpr float kPi = 3.14159265358979323846f;
-constexpr std::uint32_t kBlasLeafSize = 4u;
-constexpr std::uint32_t kTlasLeafSize = 2u;
+constexpr std::uint32_t kLeafBit = 0x80000000u;
+constexpr std::uint32_t kLeafSize = 4u;
 
-float component(const Vec3& value, int axis)
-{
-    return axis == 0 ? value.x : axis == 1 ? value.y : value.z;
-}
-
-Vec3 minimum(const Vec3& a, const Vec3& b)
+Vec3 minVec(const Vec3& a, const Vec3& b)
 {
     return {std::min(a.x, b.x), std::min(a.y, b.y), std::min(a.z, b.z)};
 }
 
-Vec3 maximum(const Vec3& a, const Vec3& b)
+Vec3 maxVec(const Vec3& a, const Vec3& b)
 {
     return {std::max(a.x, b.x), std::max(a.y, b.y), std::max(a.z, b.z)};
 }
 
-Vec3 add(const Vec3& a, const Vec3& b)
+Vec3 normalizeVec(const Vec3& value)
 {
-    return {a.x + b.x, a.y + b.y, a.z + b.z};
+    const float length_squared = value.x * value.x + value.y * value.y + value.z * value.z;
+    if (length_squared <= 1.0e-20f) return {0.0f, 1.0f, 0.0f};
+    const float inverse_length = 1.0f / std::sqrt(length_squared);
+    return {value.x * inverse_length, value.y * inverse_length, value.z * inverse_length};
 }
 
-Vec3 scale(const Vec3& value, float factor)
+float component(const Vec3& value, int axis)
 {
-    return {value.x * factor, value.y * factor, value.z * factor};
+    if (axis == 0) return value.x;
+    if (axis == 1) return value.y;
+    return value.z;
 }
 
 Mat4 identityMatrix()
@@ -176,7 +166,10 @@ Mat4 modelMatrix(const Ecs::TransformComponent& transform)
     return multiply(
         multiply(
             multiply(
-                multiply(translation(transform.position.x, transform.position.y, transform.position.z), rotationX(transform.rotation.x)),
+                multiply(
+                    translation(transform.position.x, transform.position.y, transform.position.z),
+                    rotationX(transform.rotation.x)
+                ),
                 rotationY(transform.rotation.y)
             ),
             rotationZ(transform.rotation.z)
@@ -190,10 +183,14 @@ Mat4 inverseModelMatrix(const Ecs::TransformComponent& transform)
     const float sx = std::abs(transform.scale.x) > 1.0e-8f ? 1.0f / transform.scale.x : 0.0f;
     const float sy = std::abs(transform.scale.y) > 1.0e-8f ? 1.0f / transform.scale.y : 0.0f;
     const float sz = std::abs(transform.scale.z) > 1.0e-8f ? 1.0f / transform.scale.z : 0.0f;
+
     return multiply(
         multiply(
             multiply(
-                multiply(scaling(sx, sy, sz), rotationZ(-transform.rotation.z)),
+                multiply(
+                    scaling(sx, sy, sz),
+                    rotationZ(-transform.rotation.z)
+                ),
                 rotationY(-transform.rotation.y)
             ),
             rotationX(-transform.rotation.x)
@@ -202,21 +199,32 @@ Mat4 inverseModelMatrix(const Ecs::TransformComponent& transform)
     );
 }
 
-Vec3 transformPoint(const Mat4& matrix, const Vec3& value)
+Vec3 transformPoint(const Mat4& matrix, const Models::Vec3& value)
 {
-    const float x = matrix[0] * value.x + matrix[4] * value.y + matrix[8] * value.z + matrix[12];
-    const float y = matrix[1] * value.x + matrix[5] * value.y + matrix[9] * value.z + matrix[13];
-    const float z = matrix[2] * value.x + matrix[6] * value.y + matrix[10] * value.z + matrix[14];
-    const float w = matrix[3] * value.x + matrix[7] * value.y + matrix[11] * value.z + matrix[15];
-    if (std::abs(w) <= 1.0e-8f || std::abs(w - 1.0f) <= 1.0e-8f) return {x, y, z};
-    return {x / w, y / w, z / w};
+    return {
+        matrix[0] * value.x + matrix[4] * value.y + matrix[8] * value.z + matrix[12],
+        matrix[1] * value.x + matrix[5] * value.y + matrix[9] * value.z + matrix[13],
+        matrix[2] * value.x + matrix[6] * value.y + matrix[10] * value.z + matrix[14],
+    };
+}
+
+Vec3 transformNormal(const Mat4& inverse_model, const Models::Vec3& value)
+{
+    return normalizeVec({
+        inverse_model[0] * value.x + inverse_model[1] * value.y + inverse_model[2] * value.z,
+        inverse_model[4] * value.x + inverse_model[5] * value.y + inverse_model[6] * value.z,
+        inverse_model[8] * value.x + inverse_model[9] * value.y + inverse_model[10] * value.z,
+    });
 }
 
 bool inverseMatrix(const Mat4& input, Mat4& output)
 {
     double augmented[4][8]{};
+
     for (int row = 0; row < 4; ++row) {
-        for (int column = 0; column < 4; ++column) augmented[row][column] = static_cast<double>(input[column * 4 + row]);
+        for (int column = 0; column < 4; ++column) {
+            augmented[row][column] = static_cast<double>(input[column * 4 + row]);
+        }
         augmented[row][row + 4] = 1.0;
     }
 
@@ -226,11 +234,14 @@ bool inverseMatrix(const Mat4& input, Mat4& output)
             if (std::abs(augmented[row][column]) > std::abs(augmented[pivot][column])) pivot = row;
         }
         if (std::abs(augmented[pivot][column]) < 1.0e-12) return false;
+
         if (pivot != column) {
             for (int k = 0; k < 8; ++k) std::swap(augmented[pivot][k], augmented[column][k]);
         }
+
         const double divisor = augmented[column][column];
         for (int k = 0; k < 8; ++k) augmented[column][k] /= divisor;
+
         for (int row = 0; row < 4; ++row) {
             if (row == column) continue;
             const double factor = augmented[row][column];
@@ -239,21 +250,40 @@ bool inverseMatrix(const Mat4& input, Mat4& output)
     }
 
     for (int row = 0; row < 4; ++row) {
-        for (int column = 0; column < 4; ++column) output[column * 4 + row] = static_cast<float>(augmented[row][column + 4]);
+        for (int column = 0; column < 4; ++column) {
+            output[column * 4 + row] = static_cast<float>(augmented[row][column + 4]);
+        }
     }
     return true;
 }
 
-GLuint createTexture2D(int width, int height, GLint internal_format, GLenum format, GLenum type, bool linear = false)
+GLuint createTexture2D(
+    int width,
+    int height,
+    GLint internal_format,
+    GLenum format,
+    GLenum type,
+    bool linear)
 {
     const GLuint texture = lwcgl_glGenTexture();
     if (texture == 0u) return 0u;
+
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format, type, nullptr);
+    glTexImage2D(
+        GL_TEXTURE_2D,
+        0,
+        internal_format,
+        width,
+        height,
+        0,
+        format,
+        type,
+        nullptr
+    );
     return texture;
 }
 
@@ -273,6 +303,7 @@ GLuint compileShader(GLenum stage, const char *source)
 {
     const GLuint shader = GL20.glCreateShader(stage);
     if (shader == 0u) return 0u;
+
     GL20.glShaderSource(shader, 1, &source, nullptr);
     GL20.glCompileShader(shader);
 
@@ -293,6 +324,7 @@ GLuint linkProgram(const std::vector<GLuint>& shaders)
 {
     const GLuint program = GL20.glCreateProgram();
     if (program == 0u) return 0u;
+
     for (const GLuint shader : shaders) GL20.glAttachShader(program, shader);
     GL20.glLinkProgram(program);
 
@@ -316,11 +348,13 @@ GLuint createGraphicsProgram(const char *vertex_source, const char *fragment_sou
 {
     const GLuint vertex = compileShader(GL_VERTEX_SHADER, vertex_source);
     if (vertex == 0u) return 0u;
+
     const GLuint fragment = compileShader(GL_FRAGMENT_SHADER, fragment_source);
     if (fragment == 0u) {
         GL20.glDeleteShader(vertex);
         return 0u;
     }
+
     const GLuint program = linkProgram({vertex, fragment});
     GL20.glDeleteShader(vertex);
     GL20.glDeleteShader(fragment);
@@ -331,6 +365,7 @@ GLuint createComputeProgram(const char *source)
 {
     const GLuint shader = compileShader(GL_COMPUTE_SHADER, source);
     if (shader == 0u) return 0u;
+
     const GLuint program = linkProgram({shader});
     GL20.glDeleteShader(shader);
     return program;
@@ -351,7 +386,9 @@ void setFloat(GLuint program, const char *name, float value)
 void setSize(GLuint program, const char *name, int width, int height)
 {
     const GLint location = GL20.glGetUniformLocation(program, name);
-    if (location >= 0) GL20.glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
+    if (location >= 0) {
+        GL20.glUniform2f(location, static_cast<float>(width), static_cast<float>(height));
+    }
 }
 
 void setMatrix(GLuint program, const char *name, const Mat4& value)
@@ -393,250 +430,368 @@ in vec4 vCurrentClip;
 in vec4 vPreviousClip;
 layout(location = 0) out vec4 outAlbedo;
 layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec4 outMaterial;
-layout(location = 3) out vec2 outVelocity;
+layout(location = 2) out vec2 outVelocity;
 void main() {
     vec4 base = vColor;
     if (uHasTexture != 0) base *= texture(uDiffuse, vUv);
-    if (base.a < 0.02) discard;
+    if (base.a < 0.5) discard;
+
     vec3 normal = normalize(vWorldNormal);
     vec2 currentNdc = vCurrentClip.xy / max(abs(vCurrentClip.w), 1e-6);
     vec2 previousNdc = vPreviousClip.xy / max(abs(vPreviousClip.w), 1e-6);
+
     outAlbedo = base;
     outNormal = vec4(normal * 0.5 + 0.5, 1.0);
-    outMaterial = vec4(0.8, 0.0, 0.0, 1.0);
     outVelocity = (currentNdc - previousNdc) * 0.5;
-}
-)GLSL";
-
-const char *kSurfaceCacheShader = R"GLSL(
-#version 430
-layout(local_size_x = 8, local_size_y = 8) in;
-uniform sampler2D uAlbedo;
-uniform sampler2D uNormal;
-uniform sampler2D uDepth;
-uniform vec2 uOutputSize;
-layout(rgba16f, binding = 0) writeonly uniform image2D uRadiance;
-void main() {
-    ivec2 size = ivec2(uOutputSize);
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, size))) return;
-    vec2 uv = (vec2(pixel) + 0.5) / uOutputSize;
-    float depth = texture(uDepth, uv).r;
-    if (depth >= 0.999999) {
-        imageStore(uRadiance, pixel, vec4(0.03, 0.04, 0.06, 1.0));
-        return;
-    }
-    vec3 albedo = texture(uAlbedo, uv).rgb;
-    vec3 normal = normalize(texture(uNormal, uv).xyz * 2.0 - 1.0);
-    vec3 lightDirection = normalize(vec3(-0.35, 0.8, 0.45));
-    float diffuse = max(dot(normal, lightDirection), 0.0);
-    imageStore(uRadiance, pixel, vec4(albedo * (0.08 + 0.75 * diffuse), 1.0));
 }
 )GLSL";
 
 const char *kTraceShader = R"GLSL(
 #version 430
 layout(local_size_x = 8, local_size_y = 8) in;
-struct BvhNode { vec3 bmin; uint leftFirst; vec3 bmax; uint count; };
+
+struct BvhNode {
+    vec3 bmin;
+    uint left;
+    vec3 bmax;
+    uint meta;
+};
+
 struct Triangle {
-    vec4 p0; vec4 p1; vec4 p2;
-    vec4 n0; vec4 n1; vec4 n2;
-    vec4 uv01; vec4 uv2;
+    vec4 p0;
+    vec4 p1;
+    vec4 p2;
+    vec4 n0;
+    vec4 n1;
+    vec4 n2;
+    vec4 color;
 };
-struct Instance {
-    mat4 objectToWorld;
-    mat4 worldToObject;
-    vec4 bmin;
-    vec4 bmax;
-    uvec4 meta;
-    vec4 colorOpacity;
+
+layout(std430, binding = 0) readonly buffer Nodes {
+    BvhNode nodes[];
 };
-layout(std430, binding = 0) readonly buffer BlasNodes { BvhNode blasNodes[]; };
-layout(std430, binding = 1) readonly buffer Triangles { Triangle triangles[]; };
-layout(std430, binding = 2) readonly buffer TlasNodes { BvhNode tlasNodes[]; };
-layout(std430, binding = 3) readonly buffer Instances { Instance instances[]; };
-layout(std430, binding = 4) readonly buffer BlasMetadata { uvec4 blasMetadata[]; };
+
+layout(std430, binding = 1) readonly buffer Triangles {
+    Triangle triangles[];
+};
+
 uniform sampler2D uAlbedo;
 uniform sampler2D uNormal;
 uniform sampler2D uDepth;
-uniform sampler2D uSurface;
 uniform mat4 uViewProjection;
 uniform mat4 uInverseViewProjection;
 uniform vec2 uOutputSize;
 uniform int uFrame;
-uniform int uTlasNodeCount;
+uniform int uNodeCount;
 uniform int uUseScreen;
 uniform int uUseBvh;
-uniform int uUseSurface;
 uniform int uRaysPerPixel;
 uniform int uMaxBounces;
-layout(rgba16f, binding = 0) writeonly uniform image2D uRaw;
-layout(r16f, binding = 1) writeonly uniform image2D uHitDistance;
 
-uint hashUint(uint x) {
-    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16; return x;
+layout(rgba16f, binding = 0) writeonly uniform image2D uRaw;
+
+const uint LEAF_BIT = 0x80000000u;
+
+uint hashUint(uint value) {
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    value ^= value >> 16;
+    return value;
 }
-float randomFloat(inout uint state) { state = hashUint(state); return float(state) * (1.0 / 4294967296.0); }
-vec3 cosineHemisphere(vec3 n, inout uint state) {
-    float r1 = randomFloat(state), r2 = randomFloat(state), phi = 6.28318530718 * r1, r = sqrt(r2);
-    vec3 local = vec3(r * cos(phi), r * sin(phi), sqrt(max(0.0, 1.0 - r2)));
-    vec3 helper = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(helper, n));
-    vec3 bitangent = cross(n, tangent);
-    return normalize(tangent * local.x + bitangent * local.y + n * local.z);
+
+float randomFloat(inout uint state) {
+    state = hashUint(state);
+    return float(state) * (1.0 / 4294967296.0);
 }
-vec3 inverseDirection(vec3 d) {
-    return vec3(abs(d.x) > 1e-8 ? 1.0 / d.x : 1e30, abs(d.y) > 1e-8 ? 1.0 / d.y : 1e30, abs(d.z) > 1e-8 ? 1.0 / d.z : 1e30);
+
+vec3 cosineHemisphere(vec3 normal, inout uint state) {
+    float r1 = randomFloat(state);
+    float r2 = randomFloat(state);
+    float phi = 6.28318530718 * r1;
+    float radius = sqrt(r2);
+    vec3 local = vec3(
+        radius * cos(phi),
+        radius * sin(phi),
+        sqrt(max(0.0, 1.0 - r2))
+    );
+
+    vec3 helper = abs(normal.z) < 0.999
+        ? vec3(0.0, 0.0, 1.0)
+        : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(helper, normal));
+    vec3 bitangent = cross(normal, tangent);
+    return normalize(tangent * local.x + bitangent * local.y + normal * local.z);
 }
-bool hitAabb(vec3 origin, vec3 invDir, vec3 bmin, vec3 bmax, float maxDistance) {
-    vec3 t0 = (bmin - origin) * invDir, t1 = (bmax - origin) * invDir;
-    vec3 nearV = min(t0, t1), farV = max(t0, t1);
-    float nearT = max(max(nearV.x, nearV.y), max(nearV.z, 0.0));
-    float farT = min(min(farV.x, farV.y), farV.z);
-    return farT >= nearT && nearT < maxDistance;
+
+vec3 inverseDirection(vec3 direction) {
+    return vec3(
+        abs(direction.x) > 1e-8 ? 1.0 / direction.x : 1e30,
+        abs(direction.y) > 1e-8 ? 1.0 / direction.y : 1e30,
+        abs(direction.z) > 1e-8 ? 1.0 / direction.z : 1e30
+    );
 }
-bool hitTriangle(vec3 origin, vec3 direction, Triangle triangle, inout float distance, out vec3 normal) {
-    vec3 a = triangle.p0.xyz, b = triangle.p1.xyz, c = triangle.p2.xyz;
-    vec3 e1 = b - a, e2 = c - a, p = cross(direction, e2);
-    float determinant = dot(e1, p);
+
+bool hitAabb(
+    vec3 origin,
+    vec3 inverse_direction,
+    vec3 bmin,
+    vec3 bmax,
+    float maximum_distance)
+{
+    vec3 t0 = (bmin - origin) * inverse_direction;
+    vec3 t1 = (bmax - origin) * inverse_direction;
+    vec3 near_values = min(t0, t1);
+    vec3 far_values = max(t0, t1);
+    float near_distance = max(max(near_values.x, near_values.y), max(near_values.z, 0.0));
+    float far_distance = min(min(far_values.x, far_values.y), far_values.z);
+    return far_distance >= near_distance && near_distance < maximum_distance;
+}
+
+bool hitTriangle(
+    vec3 origin,
+    vec3 direction,
+    Triangle triangle,
+    inout float distance,
+    out vec3 normal,
+    out vec3 color)
+{
+    vec3 edge1 = triangle.p1.xyz - triangle.p0.xyz;
+    vec3 edge2 = triangle.p2.xyz - triangle.p0.xyz;
+    vec3 p = cross(direction, edge2);
+    float determinant = dot(edge1, p);
     if (abs(determinant) < 1e-8) return false;
-    float invDet = 1.0 / determinant;
-    vec3 s = origin - a;
-    float u = dot(s, p) * invDet;
+
+    float inverse_determinant = 1.0 / determinant;
+    vec3 s = origin - triangle.p0.xyz;
+    float u = dot(s, p) * inverse_determinant;
     if (u < 0.0 || u > 1.0) return false;
-    vec3 q = cross(s, e1);
-    float v = dot(direction, q) * invDet;
+
+    vec3 q = cross(s, edge1);
+    float v = dot(direction, q) * inverse_determinant;
     if (v < 0.0 || u + v > 1.0) return false;
-    float t = dot(e2, q) * invDet;
-    if (t <= 0.001 || t >= distance) return false;
+
+    float t = dot(edge2, q) * inverse_determinant;
+    if (t <= 0.002 || t >= distance) return false;
+
     distance = t;
     float w = 1.0 - u - v;
-    normal = normalize(triangle.n0.xyz * w + triangle.n1.xyz * u + triangle.n2.xyz * v);
+    normal = normalize(
+        triangle.n0.xyz * w +
+        triangle.n1.xyz * u +
+        triangle.n2.xyz * v
+    );
+    if (dot(normal, direction) > 0.0) normal = -normal;
+    color = triangle.color.rgb;
     return true;
 }
-bool traceBlas(Instance instance, vec3 worldOrigin, vec3 worldDirection, inout float bestDistance, out vec3 worldNormal) {
-    uvec4 meta = blasMetadata[instance.meta.x];
-    vec3 origin = (instance.worldToObject * vec4(worldOrigin, 1.0)).xyz;
-    vec3 direction = (instance.worldToObject * vec4(worldDirection, 0.0)).xyz;
-    vec3 invDir = inverseDirection(direction);
-    uint stack[64]; int stackSize = 0; stack[stackSize++] = 0u;
-    bool hit = false; vec3 bestLocalNormal = vec3(0.0, 1.0, 0.0);
-    while (stackSize > 0) {
-        uint localNodeIndex = stack[--stackSize];
-        BvhNode node = blasNodes[meta.x + localNodeIndex];
-        if (!hitAabb(origin, invDir, node.bmin, node.bmax, bestDistance)) continue;
-        if (node.count != 0u) {
-            for (uint i = 0u; i < node.count; ++i) {
-                vec3 localNormal;
-                if (hitTriangle(origin, direction, triangles[meta.y + node.leftFirst + i], bestDistance, localNormal)) {
-                    bestLocalNormal = localNormal; hit = true;
+
+bool traceScene(
+    vec3 origin,
+    vec3 direction,
+    float maximum_distance,
+    out float distance,
+    out vec3 normal,
+    out vec3 color)
+{
+    distance = maximum_distance;
+    normal = vec3(0.0, 1.0, 0.0);
+    color = vec3(1.0);
+
+    if (uUseBvh == 0 || uNodeCount <= 0) return false;
+
+    vec3 inverse_direction = inverseDirection(direction);
+    uint stack[96];
+    int stack_size = 0;
+    stack[stack_size++] = 0u;
+    bool found = false;
+
+    while (stack_size > 0) {
+        uint node_index = stack[--stack_size];
+        if (node_index >= uint(uNodeCount)) continue;
+
+        BvhNode node = nodes[node_index];
+        if (!hitAabb(origin, inverse_direction, node.bmin, node.bmax, distance)) continue;
+
+        if ((node.meta & LEAF_BIT) != 0u) {
+            uint count = node.meta & ~LEAF_BIT;
+            for (uint i = 0u; i < count; ++i) {
+                vec3 candidate_normal;
+                vec3 candidate_color;
+                if (hitTriangle(
+                    origin,
+                    direction,
+                    triangles[node.left + i],
+                    distance,
+                    candidate_normal,
+                    candidate_color))
+                {
+                    normal = candidate_normal;
+                    color = candidate_color;
+                    found = true;
                 }
             }
-        } else if (stackSize <= 61) {
-            stack[stackSize++] = node.leftFirst + 1u; stack[stackSize++] = node.leftFirst;
+        } else if (stack_size <= 93) {
+            stack[stack_size++] = node.meta;
+            stack[stack_size++] = node.left;
         }
     }
-    if (hit) worldNormal = normalize(mat3(transpose(instance.worldToObject)) * bestLocalNormal);
-    return hit;
+
+    return found;
 }
-bool traceScene(vec3 origin, vec3 direction, out float distance, out vec3 normal, out vec3 color) {
-    distance = 1e30; normal = vec3(0.0, 1.0, 0.0); color = vec3(1.0);
-    if (uUseBvh == 0 || uTlasNodeCount == 0) return false;
-    vec3 invDir = inverseDirection(direction);
-    uint stack[64]; int stackSize = 0; stack[stackSize++] = 0u; bool anyHit = false;
-    while (stackSize > 0) {
-        uint nodeIndex = stack[--stackSize];
-        if (nodeIndex >= uint(uTlasNodeCount)) continue;
-        BvhNode node = tlasNodes[nodeIndex];
-        if (!hitAabb(origin, invDir, node.bmin, node.bmax, distance)) continue;
-        if (node.count != 0u) {
-            for (uint i = 0u; i < node.count; ++i) {
-                Instance instance = instances[node.leftFirst + i];
-                if (!hitAabb(origin, invDir, instance.bmin.xyz, instance.bmax.xyz, distance)) continue;
-                vec3 candidateNormal; float candidateDistance = distance;
-                if (traceBlas(instance, origin, direction, candidateDistance, candidateNormal)) {
-                    distance = candidateDistance; normal = candidateNormal; color = instance.colorOpacity.rgb; anyHit = true;
-                }
-            }
-        } else if (stackSize <= 61) {
-            stack[stackSize++] = node.leftFirst + 1u; stack[stackSize++] = node.leftFirst;
-        }
-    }
-    return anyHit;
+
+bool occluded(vec3 origin, vec3 direction) {
+    float distance;
+    vec3 normal;
+    vec3 color;
+    return traceScene(origin, direction, 1e20, distance, normal, color);
 }
-bool screenTrace(vec3 origin, vec3 direction, out vec2 hitUv, out float distance) {
-    for (int step = 0; step < 24; ++step) {
-        float t = 0.12 + float(step * step) * 0.035;
-        vec4 clip = uViewProjection * vec4(origin + direction * t, 1.0);
-        if (clip.w <= 0.0) continue;
-        vec3 ndc = clip.xyz / clip.w;
-        vec2 uv = ndc.xy * 0.5 + 0.5;
-        if (any(lessThan(uv, vec2(0.001))) || any(greaterThan(uv, vec2(0.999)))) return false;
-        float sceneDepth = texture(uDepth, uv).r;
-        float delta = ndc.z * 0.5 + 0.5 - sceneDepth;
-        if (sceneDepth < 0.999999 && delta > 0.0005 && delta < 0.025) { hitUv = uv; distance = t; return true; }
-    }
-    return false;
-}
+
 vec3 reconstructWorld(vec2 uv, float depth) {
     vec4 clip = vec4(uv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
     vec4 world = uInverseViewProjection * clip;
     return world.xyz / max(abs(world.w), 1e-8);
 }
+
+bool screenTrace(
+    vec3 origin,
+    vec3 direction,
+    out vec2 hit_uv,
+    out float hit_distance)
+{
+    for (int step = 0; step < 24; ++step) {
+        float t = 0.10 + float(step * step) * 0.035;
+        vec4 clip = uViewProjection * vec4(origin + direction * t, 1.0);
+        if (clip.w <= 0.0) continue;
+
+        vec3 ndc = clip.xyz / clip.w;
+        vec2 uv = ndc.xy * 0.5 + 0.5;
+        if (any(lessThan(uv, vec2(0.001))) || any(greaterThan(uv, vec2(0.999)))) {
+            return false;
+        }
+
+        float scene_depth = texture(uDepth, uv).r;
+        float ray_depth = ndc.z * 0.5 + 0.5;
+        float difference = ray_depth - scene_depth;
+        if (scene_depth < 0.999999 && difference > 0.0004 && difference < 0.02) {
+            hit_uv = uv;
+            hit_distance = t;
+            return true;
+        }
+    }
+    return false;
+}
+
+vec3 skyRadiance(vec3 direction) {
+    float elevation = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
+    vec3 horizon = vec3(0.012, 0.016, 0.025);
+    vec3 zenith = vec3(0.055, 0.070, 0.100);
+    return mix(horizon, zenith, elevation);
+}
+
+float directVisibility(vec3 position, vec3 normal, vec3 light_direction) {
+    float ndl = max(dot(normal, light_direction), 0.0);
+    if (ndl <= 0.0) return 0.0;
+    if (uUseBvh == 0 || uNodeCount <= 0) return ndl;
+    bool blocked = occluded(position + normal * 0.025, light_direction);
+    return blocked ? 0.0 : ndl;
+}
+
 void main() {
-    ivec2 size = ivec2(uOutputSize);
+    ivec2 output_size = ivec2(uOutputSize);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, size))) return;
+    if (any(greaterThanEqual(pixel, output_size))) return;
+
     vec2 uv = (vec2(pixel) + 0.5) / uOutputSize;
     float depth = texture(uDepth, uv).r;
-    if (depth >= 0.999999) { imageStore(uRaw, pixel, vec4(0.0)); imageStore(uHitDistance, pixel, vec4(0.0)); return; }
+    if (depth >= 0.999999) {
+        imageStore(uRaw, pixel, vec4(0.0));
+        return;
+    }
+
     vec3 position = reconstructWorld(uv, depth);
     vec3 normal = normalize(texture(uNormal, uv).xyz * 2.0 - 1.0);
-    int rayCount = clamp(uRaysPerPixel, 1, 4), bounceCount = clamp(uMaxBounces, 1, 4);
-    vec3 total = vec3(0.0); float firstDistance = 0.0;
-    for (int sampleIndex = 0; sampleIndex < rayCount; ++sampleIndex) {
-        uint state = uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + uint(max(uFrame, 0)) * 26699u + uint(sampleIndex) * 31847u + 1u;
-        vec3 origin = position + normal * 0.03;
-        vec3 direction = cosineHemisphere(normal, state);
-        vec3 throughput = vec3(1.0), radiance = vec3(0.0);
-        for (int bounce = 0; bounce < bounceCount; ++bounce) {
+    vec3 light_direction = normalize(vec3(-0.35, 0.8, 0.45));
+
+    float primary_direct = directVisibility(position, normal, light_direction);
+    vec3 direct_irradiance = vec3(primary_direct * 1.15);
+
+    int ray_count = clamp(uRaysPerPixel, 1, 4);
+    int bounce_count = clamp(uMaxBounces, 1, 4);
+    vec3 indirect = vec3(0.0);
+
+    for (int sample_index = 0; sample_index < ray_count; ++sample_index) {
+        uint state =
+            uint(pixel.x) * 1973u +
+            uint(pixel.y) * 9277u +
+            uint(max(uFrame, 0)) * 26699u +
+            uint(sample_index) * 31847u +
+            1u;
+
+        vec3 ray_origin = position + normal * 0.025;
+        vec3 ray_direction = cosineHemisphere(normal, state);
+        vec3 throughput = vec3(1.0);
+        vec3 radiance = vec3(0.0);
+
+        for (int bounce = 0; bounce < bounce_count; ++bounce) {
             if (bounce == 0 && uUseScreen != 0) {
-                vec2 hitUv; float screenDistance;
-                if (screenTrace(origin, direction, hitUv, screenDistance)) {
-                    vec3 hitRadiance;
-                    if (uUseSurface != 0) hitRadiance = texture(uSurface, hitUv).rgb;
-                    else {
-                        vec3 hitAlbedo = texture(uAlbedo, hitUv).rgb;
-                        vec3 hitNormal = normalize(texture(uNormal, hitUv).xyz * 2.0 - 1.0);
-                        float ndl = max(dot(hitNormal, normalize(vec3(-0.35, 0.8, 0.45))), 0.0);
-                        hitRadiance = hitAlbedo * (0.08 + 0.75 * ndl);
-                    }
-                    radiance += throughput * hitRadiance;
-                    if (sampleIndex == 0) firstDistance = screenDistance;
-                    break;
+                vec2 hit_uv;
+                float screen_distance;
+                if (screenTrace(ray_origin, ray_direction, hit_uv, screen_distance)) {
+                    float hit_depth = texture(uDepth, hit_uv).r;
+                    vec3 hit_position = reconstructWorld(hit_uv, hit_depth);
+                    vec3 hit_normal = normalize(texture(uNormal, hit_uv).xyz * 2.0 - 1.0);
+                    vec3 hit_color = texture(uAlbedo, hit_uv).rgb;
+                    float hit_direct = directVisibility(hit_position, hit_normal, light_direction);
+                    radiance += throughput * hit_color * (hit_direct * 1.15);
+
+                    throughput *= hit_color * 0.62;
+                    ray_origin = hit_position + hit_normal * 0.025;
+                    ray_direction = cosineHemisphere(hit_normal, state);
+                    continue;
                 }
             }
-            float hitDistance; vec3 hitNormal; vec3 hitColor;
-            if (!traceScene(origin, direction, hitDistance, hitNormal, hitColor)) { radiance += throughput * vec3(0.03, 0.04, 0.06); break; }
-            if (bounce == 0 && sampleIndex == 0) firstDistance = hitDistance;
-            float direct = max(dot(hitNormal, normalize(vec3(-0.35, 0.8, 0.45))), 0.0);
-            radiance += throughput * hitColor * (0.05 + 0.75 * direct);
-            throughput *= hitColor * 0.55;
-            if (max(max(throughput.r, throughput.g), throughput.b) < 0.02) break;
-            origin += direction * hitDistance + hitNormal * 0.025;
-            direction = cosineHemisphere(hitNormal, state);
+
+            float hit_distance;
+            vec3 hit_normal;
+            vec3 hit_color;
+            if (!traceScene(
+                ray_origin,
+                ray_direction,
+                1e20,
+                hit_distance,
+                hit_normal,
+                hit_color))
+            {
+                radiance += throughput * skyRadiance(ray_direction);
+                break;
+            }
+
+            vec3 hit_position = ray_origin + ray_direction * hit_distance;
+            float hit_direct = directVisibility(hit_position, hit_normal, light_direction);
+            radiance += throughput * hit_color * (hit_direct * 1.15);
+
+            throughput *= hit_color * 0.62;
+            float maximum_throughput = max(max(throughput.r, throughput.g), throughput.b);
+            if (maximum_throughput < 0.015) break;
+
+            ray_origin = hit_position + hit_normal * 0.025;
+            ray_direction = cosineHemisphere(hit_normal, state);
         }
-        total += radiance;
+
+        indirect += radiance;
     }
-    imageStore(uRaw, pixel, vec4(total / float(rayCount), 1.0));
-    imageStore(uHitDistance, pixel, vec4(firstDistance));
+
+    indirect /= float(ray_count);
+    imageStore(uRaw, pixel, vec4(max(direct_irradiance + indirect, vec3(0.0)), 1.0));
 }
 )GLSL";
 
 const char *kTemporalShader = R"GLSL(
 #version 430
 layout(local_size_x = 8, local_size_y = 8) in;
+
 uniform sampler2D uRaw;
 uniform sampler2D uPreviousHistory;
 uniform sampler2D uPreviousMoments;
@@ -649,31 +804,45 @@ uniform float uAlpha;
 uniform float uDepthReject;
 uniform float uNormalReject;
 uniform int uHasHistory;
+
 layout(rgba16f, binding = 0) writeonly uniform image2D uHistory;
 layout(rg16f, binding = 1) writeonly uniform image2D uMoments;
 layout(rgba16f, binding = 2) writeonly uniform image2D uGeometry;
+
 void main() {
-    ivec2 size = ivec2(uOutputSize);
+    ivec2 output_size = ivec2(uOutputSize);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, size))) return;
+    if (any(greaterThanEqual(pixel, output_size))) return;
+
     vec2 uv = (vec2(pixel) + 0.5) / uOutputSize;
     vec3 current = texture(uRaw, uv).rgb;
     float depth = texture(uDepth, uv).r;
     vec3 normal = normalize(texture(uNormal, uv).xyz * 2.0 - 1.0);
-    vec2 previousUv = uv - texture(uVelocity, uv).xy;
-    bool valid = uHasHistory != 0 && all(greaterThanEqual(previousUv, vec2(0.0))) && all(lessThanEqual(previousUv, vec2(1.0)));
+    vec2 previous_uv = uv - texture(uVelocity, uv).xy;
+
+    bool valid =
+        uHasHistory != 0 &&
+        all(greaterThanEqual(previous_uv, vec2(0.0))) &&
+        all(lessThanEqual(previous_uv, vec2(1.0)));
+
     vec3 result = current;
     float luminance = dot(current, vec3(0.2126, 0.7152, 0.0722));
     vec2 moments = vec2(luminance, luminance * luminance);
+
     if (valid) {
-        vec4 oldGeometry = texture(uPreviousGeometry, previousUv);
-        vec3 oldNormal = normalize(oldGeometry.xyz);
-        valid = abs(oldGeometry.w - depth) <= uDepthReject && dot(oldNormal, normal) >= uNormalReject;
+        vec4 old_geometry = texture(uPreviousGeometry, previous_uv);
+        vec3 old_normal = normalize(old_geometry.xyz);
+        valid =
+            abs(old_geometry.w - depth) <= uDepthReject &&
+            dot(old_normal, normal) >= uNormalReject;
+
         if (valid) {
-            result = mix(texture(uPreviousHistory, previousUv).rgb, current, clamp(uAlpha, 0.01, 1.0));
-            moments = mix(texture(uPreviousMoments, previousUv).rg, moments, clamp(uAlpha, 0.01, 1.0));
+            float alpha = clamp(uAlpha, 0.02, 1.0);
+            result = mix(texture(uPreviousHistory, previous_uv).rgb, current, alpha);
+            moments = mix(texture(uPreviousMoments, previous_uv).rg, moments, alpha);
         }
     }
+
     imageStore(uHistory, pixel, vec4(result, 1.0));
     imageStore(uMoments, pixel, vec4(moments, 0.0, 0.0));
     imageStore(uGeometry, pixel, vec4(normal, depth));
@@ -683,6 +852,7 @@ void main() {
 const char *kDenoiseShader = R"GLSL(
 #version 430
 layout(local_size_x = 8, local_size_y = 8) in;
+
 uniform sampler2D uInput;
 uniform sampler2D uDepth;
 uniform sampler2D uNormal;
@@ -690,58 +860,92 @@ uniform sampler2D uMoments;
 uniform vec2 uOutputSize;
 uniform int uStep;
 uniform int uUseMoments;
+
 layout(rgba16f, binding = 0) writeonly uniform image2D uOutput;
-float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
 void main() {
-    ivec2 size = ivec2(uOutputSize);
+    ivec2 output_size = ivec2(uOutputSize);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-    if (any(greaterThanEqual(pixel, size))) return;
+    if (any(greaterThanEqual(pixel, output_size))) return;
+
     vec2 uv = (vec2(pixel) + 0.5) / uOutputSize;
     vec3 center = texture(uInput, uv).rgb;
-    float centerDepth = texture(uDepth, uv).r;
-    vec3 centerNormal = normalize(texture(uNormal, uv).xyz * 2.0 - 1.0);
-    vec2 centerMoments = texture(uMoments, uv).rg;
-    float variance = uUseMoments != 0 ? max(centerMoments.y - centerMoments.x * centerMoments.x, 1e-4) : 0.02;
+    float center_depth = texture(uDepth, uv).r;
+    vec3 center_normal = normalize(texture(uNormal, uv).xyz * 2.0 - 1.0);
+    vec2 center_moments = texture(uMoments, uv).rg;
+    float variance = uUseMoments != 0
+        ? max(center_moments.y - center_moments.x * center_moments.x, 1e-4)
+        : 0.02;
+
     const float kernel[5] = float[](1.0, 4.0, 6.0, 4.0, 1.0);
-    vec3 sum = vec3(0.0); float weightSum = 0.0;
-    for (int y = -2; y <= 2; ++y) for (int x = -2; x <= 2; ++x) {
-        ivec2 q = clamp(pixel + ivec2(x, y) * uStep, ivec2(0), size - ivec2(1));
-        vec2 quv = (vec2(q) + 0.5) / uOutputSize;
-        vec3 sampleColor = texture(uInput, quv).rgb;
-        float sampleDepth = texture(uDepth, quv).r;
-        vec3 sampleNormal = normalize(texture(uNormal, quv).xyz * 2.0 - 1.0);
-        float normalWeight = pow(max(dot(centerNormal, sampleNormal), 0.0), 32.0);
-        float depthWeight = exp(-abs(sampleDepth - centerDepth) * 180.0 / float(max(uStep, 1)));
-        float colorWeight = exp(-abs(luminance(sampleColor) - luminance(center)) / (sqrt(variance) * 4.0 + 0.03));
-        float weight = kernel[x + 2] * kernel[y + 2] * normalWeight * depthWeight * colorWeight;
-        sum += sampleColor * weight; weightSum += weight;
+    vec3 sum = vec3(0.0);
+    float weight_sum = 0.0;
+
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            ivec2 sample_pixel = clamp(
+                pixel + ivec2(x, y) * uStep,
+                ivec2(0),
+                output_size - ivec2(1)
+            );
+            vec2 sample_uv = (vec2(sample_pixel) + 0.5) / uOutputSize;
+            vec3 sample_color = texture(uInput, sample_uv).rgb;
+            float sample_depth = texture(uDepth, sample_uv).r;
+            vec3 sample_normal = normalize(texture(uNormal, sample_uv).xyz * 2.0 - 1.0);
+
+            float normal_weight = pow(max(dot(center_normal, sample_normal), 0.0), 32.0);
+            float depth_weight = exp(
+                -abs(sample_depth - center_depth) * 180.0 / float(max(uStep, 1))
+            );
+            float color_weight = exp(
+                -abs(luminance(sample_color) - luminance(center)) /
+                (sqrt(variance) * 4.0 + 0.03)
+            );
+            float weight =
+                kernel[x + 2] * kernel[y + 2] *
+                normal_weight * depth_weight * color_weight;
+
+            sum += sample_color * weight;
+            weight_sum += weight;
+        }
     }
-    imageStore(uOutput, pixel, vec4(sum / max(weightSum, 1e-6), 1.0));
+
+    imageStore(uOutput, pixel, vec4(sum / max(weight_sum, 1e-6), 1.0));
 }
 )GLSL";
 
 const char *kComposeVertexShader = R"GLSL(
 #version 430 compatibility
 out vec2 vUv;
-void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); vUv = gl_Vertex.xy * 0.5 + 0.5; }
+void main() {
+    gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0);
+    vUv = gl_Vertex.xy * 0.5 + 0.5;
+}
 )GLSL";
 
 const char *kComposeFragmentShader = R"GLSL(
 #version 430 compatibility
 uniform sampler2D uAlbedo;
-uniform sampler2D uNormal;
 uniform sampler2D uDepth;
-uniform sampler2D uGi;
+uniform sampler2D uLighting;
 in vec2 vUv;
 layout(location = 0) out vec4 outColor;
 void main() {
     float depth = texture(uDepth, vUv).r;
-    if (depth >= 0.999999) { outColor = vec4(0.035, 0.035, 0.045, 1.0); return; }
+    if (depth >= 0.999999) {
+        outColor = vec4(0.035, 0.035, 0.045, 1.0);
+        return;
+    }
+
     vec4 albedo = texture(uAlbedo, vUv);
-    vec3 normal = normalize(texture(uNormal, vUv).xyz * 2.0 - 1.0);
-    vec3 indirect = texture(uGi, vUv).rgb;
-    float direct = max(dot(normal, normalize(vec3(-0.35, 0.8, 0.45))), 0.0);
-    outColor = vec4(albedo.rgb * (0.08 + 0.75 * direct) + albedo.rgb * indirect, albedo.a);
+    vec3 incident_lighting = max(texture(uLighting, vUv).rgb, vec3(0.0));
+    vec3 color = albedo.rgb * incident_lighting;
+    color = color / (vec3(1.0) + color);
+    outColor = vec4(color, albedo.a);
 }
 )GLSL";
 
@@ -749,65 +953,71 @@ void main() {
 
 struct GI::Impl {
     struct alignas(16) BvhNode {
-        float min_x = 0.0f, min_y = 0.0f, min_z = 0.0f;
-        std::uint32_t left_first = 0u;
-        float max_x = 0.0f, max_y = 0.0f, max_z = 0.0f;
-        std::uint32_t count = 0u;
+        float min_x = 0.0f;
+        float min_y = 0.0f;
+        float min_z = 0.0f;
+        std::uint32_t left = 0u;
+        float max_x = 0.0f;
+        float max_y = 0.0f;
+        float max_z = 0.0f;
+        std::uint32_t meta = 0u;
     };
 
     struct alignas(16) GpuTriangle {
-        std::array<float, 4> p0{}, p1{}, p2{}, n0{}, n1{}, n2{}, uv01{}, uv2{};
+        std::array<float, 4> p0{};
+        std::array<float, 4> p1{};
+        std::array<float, 4> p2{};
+        std::array<float, 4> n0{};
+        std::array<float, 4> n1{};
+        std::array<float, 4> n2{};
+        std::array<float, 4> color{};
     };
-
-    struct Blas {
-        std::vector<BvhNode> nodes;
-        std::vector<GpuTriangle> triangles;
-        std::uint32_t meta_index = 0u;
-    };
-
-    struct alignas(16) TlasInstance {
-        Mat4 object_to_world{};
-        Mat4 world_to_object{};
-        std::array<float, 4> bounds_min{}, bounds_max{};
-        std::array<std::uint32_t, 4> meta{};
-        std::array<float, 4> color_opacity{};
-    };
-
-    struct GBuffer {
-        GLuint framebuffer = 0u, albedo = 0u, normal = 0u, material = 0u, velocity = 0u, depth = 0u;
-    } gbuffer;
-
-    struct Buffers {
-        GLuint raw = 0u;
-        std::array<GLuint, 2> history{}, moments{}, geometry{};
-        GLuint denoised = 0u, temporary = 0u, hit_distance = 0u, final_texture = 0u;
-    } buffers;
-
-    struct SurfaceCache { GLuint radiance = 0u; } surface;
-    struct Programs { GLuint gbuffer = 0u, surface = 0u, trace = 0u, temporal = 0u, denoise = 0u, compose = 0u; } programs;
 
     GiSettings settings{};
+
     bool initialized = false;
-    int width = 1, height = 1, gi_width = 1, gi_height = 1;
-    std::uint64_t frame = 0u;
+    bool geometry_ready = false;
+    int width = 1;
+    int height = 1;
+    int gi_width = 1;
+    int gi_height = 1;
     int history_index = 0;
+    std::uint64_t frame = 0u;
+    std::uint64_t geometry_hash = 0u;
+
     Mat4 current_view_projection = identityMatrix();
     Mat4 previous_view_projection = identityMatrix();
     Mat4 inverse_view_projection = identityMatrix();
     Mat4 inverse_view = identityMatrix();
 
-    std::unordered_map<std::uint32_t, Blas> blas_cache;
-    bool blas_buffers_dirty = true;
-    std::vector<BvhNode> global_blas_nodes, tlas_nodes;
-    std::vector<GpuTriangle> global_triangles;
-    std::vector<std::array<std::uint32_t, 4>> blas_metadata;
-    std::vector<TlasInstance> tlas_instances;
-    GLuint blas_node_buffer = 0u, triangle_buffer = 0u, blas_metadata_buffer = 0u, tlas_node_buffer = 0u, tlas_instance_buffer = 0u;
+    GLuint gbuffer_framebuffer = 0u;
+    GLuint gbuffer_albedo = 0u;
+    GLuint gbuffer_normal = 0u;
+    GLuint gbuffer_velocity = 0u;
+    GLuint gbuffer_depth = 0u;
 
-    struct BuildTriangle { GpuTriangle triangle; Vec3 minimum, maximum, centroid; };
-    struct BuildInstance { TlasInstance instance; Vec3 minimum, maximum, centroid; };
+    GLuint raw = 0u;
+    std::array<GLuint, 2> history{};
+    std::array<GLuint, 2> moments{};
+    std::array<GLuint, 2> geometry{};
+    std::array<GLuint, 2> denoise{};
 
-    bool active() const { return initialized && settings.enabled; }
+    GLuint node_buffer = 0u;
+    GLuint triangle_buffer = 0u;
+
+    GLuint gbuffer_program = 0u;
+    GLuint trace_program = 0u;
+    GLuint temporal_program = 0u;
+    GLuint denoise_program = 0u;
+    GLuint compose_program = 0u;
+
+    std::vector<BvhNode> nodes;
+    std::vector<GpuTriangle> triangles;
+
+    bool active() const
+    {
+        return initialized && settings.enabled;
+    }
 
     void updateResolution()
     {
@@ -816,277 +1026,569 @@ struct GI::Impl {
         gi_height = std::max(height / divisor, 1);
     }
 
-    void destroyGBuffer()
+    static void hashValue(std::uint64_t& hash, std::uint32_t value)
     {
-        if (gbuffer.framebuffer != 0u) GL30.glDeleteFramebuffers(1, &gbuffer.framebuffer);
-        deleteTexture(gbuffer.albedo); deleteTexture(gbuffer.normal); deleteTexture(gbuffer.material); deleteTexture(gbuffer.velocity); deleteTexture(gbuffer.depth);
-        gbuffer = {};
+        hash ^= static_cast<std::uint64_t>(value);
+        hash *= 1099511628211ull;
     }
 
-    bool createGBuffer()
+    static void hashFloat(std::uint64_t& hash, float value)
     {
-        gbuffer.albedo = createTexture2D(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-        gbuffer.normal = createTexture2D(width, height, GL_RGBA16F, GL_RGBA, GL_FLOAT);
-        gbuffer.material = createTexture2D(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
-        gbuffer.velocity = createTexture2D(width, height, GL_RG16F, GL_RG, GL_FLOAT);
-        gbuffer.depth = createTexture2D(width, height, GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT);
-        if (!gbuffer.albedo || !gbuffer.normal || !gbuffer.material || !gbuffer.velocity || !gbuffer.depth) return false;
-        GL30.glGenFramebuffers(1, &gbuffer.framebuffer);
-        GL30.glBindFramebuffer(GL_FRAMEBUFFER, gbuffer.framebuffer);
-        GL30.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gbuffer.albedo, 0);
-        GL30.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gbuffer.normal, 0);
-        GL30.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gbuffer.material, 0);
-        GL30.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT3, GL_TEXTURE_2D, gbuffer.velocity, 0);
-        GL30.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, gbuffer.depth, 0);
-        const GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3};
-        GL20.glDrawBuffers(4, attachments);
-        const bool complete = GL30.glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-        GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u);
-        if (!complete) std::fprintf(stderr, "[GI]: GBuffer framebuffer incomplete\n");
-        return complete;
+        hashValue(hash, std::bit_cast<std::uint32_t>(value));
     }
 
-    void destroyGiBuffers()
+    std::uint64_t geometryHash(const Ecs::World& world) const
     {
-        deleteTexture(buffers.raw);
-        for (GLuint& texture : buffers.history) deleteTexture(texture);
-        for (GLuint& texture : buffers.moments) deleteTexture(texture);
-        for (GLuint& texture : buffers.geometry) deleteTexture(texture);
-        deleteTexture(buffers.denoised); deleteTexture(buffers.temporary); deleteTexture(buffers.hit_distance);
-        buffers = {};
+        std::uint64_t hash = 1469598103934665603ull;
+
+        for (const Ecs::Entity entity : world.entities()) {
+            const Ecs::RenderableComponent *renderable = world.getRenderable(entity);
+            const Ecs::MeshComponent *mesh = world.getMesh(entity);
+            const Ecs::TransformComponent *transform = world.getTransform(entity);
+            if (!renderable || !renderable->visible || !mesh || !transform) continue;
+
+            hashValue(hash, entity);
+            hashValue(hash, mesh->mesh);
+            hashValue(hash, mesh->material);
+            hashFloat(hash, transform->position.x);
+            hashFloat(hash, transform->position.y);
+            hashFloat(hash, transform->position.z);
+            hashFloat(hash, transform->rotation.x);
+            hashFloat(hash, transform->rotation.y);
+            hashFloat(hash, transform->rotation.z);
+            hashFloat(hash, transform->scale.x);
+            hashFloat(hash, transform->scale.y);
+            hashFloat(hash, transform->scale.z);
+        }
+
+        return hash;
     }
 
-    bool createGiBuffers()
+    Vec3 materialColor(std::uint32_t handle) const
     {
-        buffers.raw = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
-        for (GLuint& texture : buffers.history) texture = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
-        for (GLuint& texture : buffers.moments) texture = createTexture2D(gi_width, gi_height, GL_RG16F, GL_RG, GL_FLOAT, true);
-        for (GLuint& texture : buffers.geometry) texture = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
-        buffers.denoised = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
-        buffers.temporary = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
-        buffers.hit_distance = createTexture2D(gi_width, gi_height, GL_R16F, GL_RED, GL_FLOAT);
-        return buffers.raw && buffers.history[0] && buffers.history[1] && buffers.moments[0] && buffers.moments[1]
-            && buffers.geometry[0] && buffers.geometry[1] && buffers.denoised && buffers.temporary && buffers.hit_distance;
+        const Models::MaterialData *material = Models::material(handle);
+        if (!material) return {1.0f, 1.0f, 1.0f};
+
+        Vec3 result{material->color.x, material->color.y, material->color.z};
+        if (material->diffuse_texture == Models::INVALID_TEXTURE) return result;
+
+        const Models::TextureAsset *texture = Models::texture(material->diffuse_texture);
+        if (!texture || texture->image.rgba.size() < 4u) return result;
+
+        const std::size_t pixel_count = texture->image.rgba.size() / 4u;
+        const std::size_t stride = std::max<std::size_t>(pixel_count / 4096u, 1u);
+        std::uint64_t red = 0u;
+        std::uint64_t green = 0u;
+        std::uint64_t blue = 0u;
+        std::size_t samples = 0u;
+
+        for (std::size_t pixel = 0u; pixel < pixel_count; pixel += stride) {
+            const std::size_t offset = pixel * 4u;
+            red += texture->image.rgba[offset + 0u];
+            green += texture->image.rgba[offset + 1u];
+            blue += texture->image.rgba[offset + 2u];
+            ++samples;
+        }
+
+        if (samples == 0u) return result;
+        const float inverse = 1.0f / (255.0f * static_cast<float>(samples));
+        result.x *= static_cast<float>(red) * inverse;
+        result.y *= static_cast<float>(green) * inverse;
+        result.z *= static_cast<float>(blue) * inverse;
+        return result;
     }
 
-    void destroySurface() { deleteTexture(surface.radiance); surface = {}; }
-    bool createSurface() { surface.radiance = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true); return surface.radiance != 0u; }
-
-    void destroyPrograms()
+    static Vec3 triangleCentroid(const GpuTriangle& triangle)
     {
-        if (programs.gbuffer) GL20.glDeleteProgram(programs.gbuffer);
-        if (programs.surface) GL20.glDeleteProgram(programs.surface);
-        if (programs.trace) GL20.glDeleteProgram(programs.trace);
-        if (programs.temporal) GL20.glDeleteProgram(programs.temporal);
-        if (programs.denoise) GL20.glDeleteProgram(programs.denoise);
-        if (programs.compose) GL20.glDeleteProgram(programs.compose);
-        programs = {};
+        return {
+            (triangle.p0[0] + triangle.p1[0] + triangle.p2[0]) / 3.0f,
+            (triangle.p0[1] + triangle.p1[1] + triangle.p2[1]) / 3.0f,
+            (triangle.p0[2] + triangle.p1[2] + triangle.p2[2]) / 3.0f,
+        };
+    }
+
+    std::uint32_t buildNode(std::uint32_t start, std::uint32_t count)
+    {
+        const float infinity = std::numeric_limits<float>::infinity();
+        Vec3 bounds_min{infinity, infinity, infinity};
+        Vec3 bounds_max{-infinity, -infinity, -infinity};
+        Vec3 centroid_min{infinity, infinity, infinity};
+        Vec3 centroid_max{-infinity, -infinity, -infinity};
+
+        for (std::uint32_t i = 0u; i < count; ++i) {
+            const GpuTriangle& triangle = triangles[start + i];
+            const Vec3 p0{triangle.p0[0], triangle.p0[1], triangle.p0[2]};
+            const Vec3 p1{triangle.p1[0], triangle.p1[1], triangle.p1[2]};
+            const Vec3 p2{triangle.p2[0], triangle.p2[1], triangle.p2[2]};
+            bounds_min = minVec(bounds_min, minVec(p0, minVec(p1, p2)));
+            bounds_max = maxVec(bounds_max, maxVec(p0, maxVec(p1, p2)));
+            const Vec3 centroid = triangleCentroid(triangle);
+            centroid_min = minVec(centroid_min, centroid);
+            centroid_max = maxVec(centroid_max, centroid);
+        }
+
+        BvhNode node{};
+        node.min_x = bounds_min.x;
+        node.min_y = bounds_min.y;
+        node.min_z = bounds_min.z;
+        node.max_x = bounds_max.x;
+        node.max_y = bounds_max.y;
+        node.max_z = bounds_max.z;
+
+        const std::uint32_t node_index = static_cast<std::uint32_t>(nodes.size());
+        nodes.push_back(node);
+
+        const Vec3 centroid_extent{
+            centroid_max.x - centroid_min.x,
+            centroid_max.y - centroid_min.y,
+            centroid_max.z - centroid_min.z,
+        };
+
+        int axis = 0;
+        if (centroid_extent.y > centroid_extent.x) axis = 1;
+        if (component(centroid_extent, 2) > component(centroid_extent, axis)) axis = 2;
+
+        if (count <= kLeafSize || component(centroid_extent, axis) <= 1.0e-6f) {
+            nodes[node_index].left = start;
+            nodes[node_index].meta = kLeafBit | count;
+            return node_index;
+        }
+
+        const std::uint32_t left_count = count / 2u;
+        const std::uint32_t middle = start + left_count;
+        std::nth_element(
+            triangles.begin() + start,
+            triangles.begin() + middle,
+            triangles.begin() + start + count,
+            [axis](const GpuTriangle& a, const GpuTriangle& b) {
+                return component(triangleCentroid(a), axis) < component(triangleCentroid(b), axis);
+            }
+        );
+
+        const std::uint32_t left_child = buildNode(start, left_count);
+        const std::uint32_t right_child = buildNode(middle, count - left_count);
+        nodes[node_index].left = left_child;
+        nodes[node_index].meta = right_child;
+        return node_index;
+    }
+
+    bool uploadGeometry()
+    {
+        if (node_buffer == 0u) GL15.glGenBuffers(1, &node_buffer);
+        if (triangle_buffer == 0u) GL15.glGenBuffers(1, &triangle_buffer);
+        if (node_buffer == 0u || triangle_buffer == 0u) return false;
+
+        GL15.glBindBuffer(GL_SHADER_STORAGE_BUFFER, node_buffer);
+        GL15.glBufferData(
+            GL_SHADER_STORAGE_BUFFER,
+            static_cast<LWCGLsizeiptr>(nodes.size() * sizeof(BvhNode)),
+            nodes.empty() ? nullptr : nodes.data(),
+            GL_STATIC_DRAW
+        );
+
+        GL15.glBindBuffer(GL_SHADER_STORAGE_BUFFER, triangle_buffer);
+        GL15.glBufferData(
+            GL_SHADER_STORAGE_BUFFER,
+            static_cast<LWCGLsizeiptr>(triangles.size() * sizeof(GpuTriangle)),
+            triangles.empty() ? nullptr : triangles.data(),
+            GL_STATIC_DRAW
+        );
+
+        GL15.glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0u);
+        return true;
+    }
+
+    bool rebuildGeometry(const Ecs::World& world)
+    {
+        const std::uint64_t next_hash = geometryHash(world);
+        if (geometry_ready && next_hash == geometry_hash) return true;
+
+        geometry_hash = next_hash;
+        geometry_ready = false;
+        triangles.clear();
+        nodes.clear();
+
+        for (const Ecs::Entity entity : world.entities()) {
+            const Ecs::RenderableComponent *renderable = world.getRenderable(entity);
+            const Ecs::MeshComponent *mesh_component = world.getMesh(entity);
+            const Ecs::TransformComponent *transform = world.getTransform(entity);
+            if (!renderable || !renderable->visible || !mesh_component || !transform) continue;
+
+            const Models::MeshData *mesh = Models::mesh(mesh_component->mesh);
+            if (!mesh || mesh->indices.size() < 3u) continue;
+
+            const Models::MaterialData *material = Models::material(mesh_component->material);
+            if (material && material->opacity < 0.1f) continue;
+
+            const Vec3 color = materialColor(mesh_component->material);
+            const Mat4 model = modelMatrix(*transform);
+            const Mat4 inverse_model = inverseModelMatrix(*transform);
+
+            for (std::size_t index = 0u; index + 2u < mesh->indices.size(); index += 3u) {
+                const std::uint32_t i0 = mesh->indices[index + 0u];
+                const std::uint32_t i1 = mesh->indices[index + 1u];
+                const std::uint32_t i2 = mesh->indices[index + 2u];
+                if (i0 >= mesh->vertices.size() || i1 >= mesh->vertices.size() || i2 >= mesh->vertices.size()) {
+                    continue;
+                }
+
+                const Models::Vertex& v0 = mesh->vertices[i0];
+                const Models::Vertex& v1 = mesh->vertices[i1];
+                const Models::Vertex& v2 = mesh->vertices[i2];
+                const Vec3 p0 = transformPoint(model, v0.position);
+                const Vec3 p1 = transformPoint(model, v1.position);
+                const Vec3 p2 = transformPoint(model, v2.position);
+                const Vec3 n0 = transformNormal(inverse_model, v0.normal);
+                const Vec3 n1 = transformNormal(inverse_model, v1.normal);
+                const Vec3 n2 = transformNormal(inverse_model, v2.normal);
+
+                GpuTriangle triangle{};
+                triangle.p0 = {p0.x, p0.y, p0.z, 0.0f};
+                triangle.p1 = {p1.x, p1.y, p1.z, 0.0f};
+                triangle.p2 = {p2.x, p2.y, p2.z, 0.0f};
+                triangle.n0 = {n0.x, n0.y, n0.z, 0.0f};
+                triangle.n1 = {n1.x, n1.y, n1.z, 0.0f};
+                triangle.n2 = {n2.x, n2.y, n2.z, 0.0f};
+                triangle.color = {
+                    color.x,
+                    color.y,
+                    color.z,
+                    material ? std::clamp(material->opacity, 0.0f, 1.0f) : 1.0f,
+                };
+                triangles.push_back(triangle);
+            }
+        }
+
+        if (!triangles.empty()) buildNode(0u, static_cast<std::uint32_t>(triangles.size()));
+        if (!uploadGeometry()) return false;
+
+        geometry_ready = true;
+        std::fprintf(
+            stderr,
+            "[GI]: world BVH %zu triangles, %zu nodes\n",
+            triangles.size(),
+            nodes.size()
+        );
+        return true;
     }
 
     bool createPrograms()
     {
-        programs.gbuffer = createGraphicsProgram(kGBufferVertexShader, kGBufferFragmentShader);
-        programs.surface = createComputeProgram(kSurfaceCacheShader);
-        programs.trace = createComputeProgram(kTraceShader);
-        programs.temporal = createComputeProgram(kTemporalShader);
-        programs.denoise = createComputeProgram(kDenoiseShader);
-        programs.compose = createGraphicsProgram(kComposeVertexShader, kComposeFragmentShader);
-        return programs.gbuffer && programs.surface && programs.trace && programs.temporal && programs.denoise && programs.compose;
+        gbuffer_program = createGraphicsProgram(kGBufferVertexShader, kGBufferFragmentShader);
+        trace_program = createComputeProgram(kTraceShader);
+        temporal_program = createComputeProgram(kTemporalShader);
+        denoise_program = createComputeProgram(kDenoiseShader);
+        compose_program = createGraphicsProgram(kComposeVertexShader, kComposeFragmentShader);
+        return
+            gbuffer_program != 0u &&
+            trace_program != 0u &&
+            temporal_program != 0u &&
+            denoise_program != 0u &&
+            compose_program != 0u;
     }
 
-    template <typename T>
-    void uploadBuffer(GLuint& buffer, const std::vector<T>& values, GLenum usage)
+    void destroyPrograms()
     {
-        if (buffer == 0u) GL15.glGenBuffers(1, &buffer);
-        GL15.glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer);
-        if (values.empty()) {
-            const std::uint32_t zero = 0u;
-            GL15.glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<LWCGLsizeiptr>(sizeof(zero)), &zero, usage);
-        } else {
-            GL15.glBufferData(GL_SHADER_STORAGE_BUFFER, static_cast<LWCGLsizeiptr>(values.size() * sizeof(T)), values.data(), usage);
-        }
-        GL15.glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0u);
-    }
-
-    void buildBlas(std::uint32_t mesh_handle, Blas& blas)
-    {
-        const Models::MeshData *mesh = Models::mesh(mesh_handle);
-        if (!mesh || mesh->indices.size() < 3u) return;
-        std::vector<BuildTriangle> build;
-        build.reserve(mesh->indices.size() / 3u);
-        for (std::size_t i = 0; i + 2u < mesh->indices.size(); i += 3u) {
-            const std::uint32_t ia = mesh->indices[i], ib = mesh->indices[i + 1u], ic = mesh->indices[i + 2u];
-            if (ia >= mesh->vertices.size() || ib >= mesh->vertices.size() || ic >= mesh->vertices.size()) continue;
-            const Models::Vertex& a = mesh->vertices[ia]; const Models::Vertex& b = mesh->vertices[ib]; const Models::Vertex& c = mesh->vertices[ic];
-            BuildTriangle item{};
-            item.triangle.p0 = {a.position.x, a.position.y, a.position.z, 0.0f}; item.triangle.p1 = {b.position.x, b.position.y, b.position.z, 0.0f}; item.triangle.p2 = {c.position.x, c.position.y, c.position.z, 0.0f};
-            item.triangle.n0 = {a.normal.x, a.normal.y, a.normal.z, 0.0f}; item.triangle.n1 = {b.normal.x, b.normal.y, b.normal.z, 0.0f}; item.triangle.n2 = {c.normal.x, c.normal.y, c.normal.z, 0.0f};
-            item.triangle.uv01 = {a.uv.x, a.uv.y, b.uv.x, b.uv.y}; item.triangle.uv2 = {c.uv.x, c.uv.y, 0.0f, 0.0f};
-            const Vec3 pa{a.position.x, a.position.y, a.position.z}, pb{b.position.x, b.position.y, b.position.z}, pc{c.position.x, c.position.y, c.position.z};
-            item.minimum = minimum(pa, minimum(pb, pc)); item.maximum = maximum(pa, maximum(pb, pc)); item.centroid = scale(add(add(pa, pb), pc), 1.0f / 3.0f);
-            build.push_back(item);
-        }
-        if (build.empty()) return;
-        blas.nodes.clear(); blas.nodes.emplace_back();
-        const auto build_node = [&](auto&& self, std::uint32_t node_index, std::uint32_t first, std::uint32_t count) -> void {
-            Vec3 bounds_min{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-            Vec3 bounds_max{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
-            Vec3 centroid_min = bounds_min, centroid_max = bounds_max;
-            for (std::uint32_t i = first; i < first + count; ++i) {
-                bounds_min = minimum(bounds_min, build[i].minimum); bounds_max = maximum(bounds_max, build[i].maximum);
-                centroid_min = minimum(centroid_min, build[i].centroid); centroid_max = maximum(centroid_max, build[i].centroid);
-            }
-            BvhNode& node = blas.nodes[node_index];
-            node.min_x = bounds_min.x; node.min_y = bounds_min.y; node.min_z = bounds_min.z; node.max_x = bounds_max.x; node.max_y = bounds_max.y; node.max_z = bounds_max.z;
-            const Vec3 extent{centroid_max.x - centroid_min.x, centroid_max.y - centroid_min.y, centroid_max.z - centroid_min.z};
-            int axis = 0; if (extent.y > extent.x) axis = 1; if (component(extent, 2) > component(extent, axis)) axis = 2;
-            if (count <= kBlasLeafSize || component(extent, axis) <= 1.0e-6f) { node.left_first = first; node.count = count; return; }
-            const std::uint32_t middle = first + count / 2u;
-            std::nth_element(build.begin() + first, build.begin() + middle, build.begin() + first + count, [axis](const BuildTriangle& lhs, const BuildTriangle& rhs) { return component(lhs.centroid, axis) < component(rhs.centroid, axis); });
-            const std::uint32_t left = static_cast<std::uint32_t>(blas.nodes.size());
-            blas.nodes.emplace_back(); blas.nodes.emplace_back(); blas.nodes[node_index].left_first = left; blas.nodes[node_index].count = 0u;
-            self(self, left, first, middle - first); self(self, left + 1u, middle, first + count - middle);
+        if (!GL20.glDeleteProgram) return;
+        GLuint *programs[] = {
+            &gbuffer_program,
+            &trace_program,
+            &temporal_program,
+            &denoise_program,
+            &compose_program,
         };
-        build_node(build_node, 0u, 0u, static_cast<std::uint32_t>(build.size()));
-        blas.triangles.clear(); blas.triangles.reserve(build.size()); for (const BuildTriangle& item : build) blas.triangles.push_back(item.triangle);
-    }
-
-    void ensureBlas(std::uint32_t mesh_handle)
-    {
-        if (blas_cache.find(mesh_handle) != blas_cache.end()) return;
-        Blas blas; buildBlas(mesh_handle, blas); blas_cache.emplace(mesh_handle, std::move(blas)); blas_buffers_dirty = true;
-    }
-
-    void uploadBlasBuffers()
-    {
-        if (!blas_buffers_dirty) return;
-        global_blas_nodes.clear(); global_triangles.clear(); blas_metadata.clear();
-        std::uint32_t meta_index = 0u;
-        for (auto& [mesh_handle, blas] : blas_cache) {
-            (void)mesh_handle;
-            blas.meta_index = meta_index++;
-            const std::uint32_t node_offset = static_cast<std::uint32_t>(global_blas_nodes.size());
-            const std::uint32_t triangle_offset = static_cast<std::uint32_t>(global_triangles.size());
-            global_blas_nodes.insert(global_blas_nodes.end(), blas.nodes.begin(), blas.nodes.end());
-            global_triangles.insert(global_triangles.end(), blas.triangles.begin(), blas.triangles.end());
-            blas_metadata.push_back({node_offset, triangle_offset, static_cast<std::uint32_t>(blas.nodes.size()), static_cast<std::uint32_t>(blas.triangles.size())});
+        for (GLuint *program : programs) {
+            if (*program != 0u) GL20.glDeleteProgram(*program);
+            *program = 0u;
         }
-        uploadBuffer(blas_node_buffer, global_blas_nodes, GL_STATIC_DRAW); uploadBuffer(triangle_buffer, global_triangles, GL_STATIC_DRAW); uploadBuffer(blas_metadata_buffer, blas_metadata, GL_STATIC_DRAW);
-        blas_buffers_dirty = false;
     }
 
-    void rebuildTlas(const Ecs::World& world)
+    bool createGBuffer()
     {
-        std::vector<BuildInstance> build; build.reserve(world.entities().size());
-        for (const Ecs::Entity entity : world.entities()) {
-            const Ecs::RenderableComponent *renderable = world.getRenderable(entity); const Ecs::MeshComponent *mesh_component = world.getMesh(entity); const Ecs::TransformComponent *transform = world.getTransform(entity);
-            if (!renderable || !renderable->visible || !mesh_component || !transform) continue;
-            const auto found = blas_cache.find(mesh_component->mesh); const Models::MeshData *mesh = Models::mesh(mesh_component->mesh);
-            if (found == blas_cache.end() || !mesh || found->second.nodes.empty()) continue;
-            const Mat4 object_to_world = modelMatrix(*transform), world_to_object = inverseModelMatrix(*transform);
-            const Vec3 local_min{mesh->bounds.minimum.x, mesh->bounds.minimum.y, mesh->bounds.minimum.z}, local_max{mesh->bounds.maximum.x, mesh->bounds.maximum.y, mesh->bounds.maximum.z};
-            Vec3 world_min{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
-            Vec3 world_max{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()};
-            for (int corner = 0; corner < 8; ++corner) {
-                const Vec3 local{(corner & 1) ? local_max.x : local_min.x, (corner & 2) ? local_max.y : local_min.y, (corner & 4) ? local_max.z : local_min.z};
-                const Vec3 point = transformPoint(object_to_world, local); world_min = minimum(world_min, point); world_max = maximum(world_max, point);
-            }
-            BuildInstance item{}; item.instance.object_to_world = object_to_world; item.instance.world_to_object = world_to_object;
-            item.instance.bounds_min = {world_min.x, world_min.y, world_min.z, 0.0f}; item.instance.bounds_max = {world_max.x, world_max.y, world_max.z, 0.0f}; item.instance.meta = {found->second.meta_index, mesh_component->material, 0u, 0u};
-            const Models::MaterialData *material = Models::material(mesh_component->material);
-            item.instance.color_opacity = material ? std::array<float, 4>{material->color.x, material->color.y, material->color.z, material->opacity} : std::array<float, 4>{1.0f, 1.0f, 1.0f, 1.0f};
-            item.minimum = world_min; item.maximum = world_max; item.centroid = scale(add(world_min, world_max), 0.5f); build.push_back(item);
+        gbuffer_albedo = createTexture2D(width, height, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, false);
+        gbuffer_normal = createTexture2D(width, height, GL_RGBA16F, GL_RGBA, GL_FLOAT, false);
+        gbuffer_velocity = createTexture2D(width, height, GL_RG16F, GL_RG, GL_FLOAT, false);
+        gbuffer_depth = createTexture2D(
+            width,
+            height,
+            GL_DEPTH_COMPONENT32F,
+            GL_DEPTH_COMPONENT,
+            GL_FLOAT,
+            false
+        );
+
+        if (
+            gbuffer_albedo == 0u ||
+            gbuffer_normal == 0u ||
+            gbuffer_velocity == 0u ||
+            gbuffer_depth == 0u)
+        {
+            return false;
         }
-        tlas_nodes.clear(); tlas_instances.clear(); if (build.empty()) return; tlas_nodes.emplace_back();
-        const auto build_node = [&](auto&& self, std::uint32_t node_index, std::uint32_t first, std::uint32_t count) -> void {
-            Vec3 bounds_min{std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max()}; Vec3 bounds_max{-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()}; Vec3 centroid_min = bounds_min, centroid_max = bounds_max;
-            for (std::uint32_t i = first; i < first + count; ++i) { bounds_min = minimum(bounds_min, build[i].minimum); bounds_max = maximum(bounds_max, build[i].maximum); centroid_min = minimum(centroid_min, build[i].centroid); centroid_max = maximum(centroid_max, build[i].centroid); }
-            BvhNode& node = tlas_nodes[node_index]; node.min_x = bounds_min.x; node.min_y = bounds_min.y; node.min_z = bounds_min.z; node.max_x = bounds_max.x; node.max_y = bounds_max.y; node.max_z = bounds_max.z;
-            const Vec3 extent{centroid_max.x - centroid_min.x, centroid_max.y - centroid_min.y, centroid_max.z - centroid_min.z}; int axis = 0; if (extent.y > extent.x) axis = 1; if (component(extent, 2) > component(extent, axis)) axis = 2;
-            if (count <= kTlasLeafSize || component(extent, axis) <= 1.0e-6f) { node.left_first = first; node.count = count; return; }
-            const std::uint32_t middle = first + count / 2u; std::nth_element(build.begin() + first, build.begin() + middle, build.begin() + first + count, [axis](const BuildInstance& lhs, const BuildInstance& rhs) { return component(lhs.centroid, axis) < component(rhs.centroid, axis); });
-            const std::uint32_t left = static_cast<std::uint32_t>(tlas_nodes.size()); tlas_nodes.emplace_back(); tlas_nodes.emplace_back(); tlas_nodes[node_index].left_first = left; tlas_nodes[node_index].count = 0u; self(self, left, first, middle - first); self(self, left + 1u, middle, first + count - middle);
+
+        GL30.glGenFramebuffers(1, &gbuffer_framebuffer);
+        if (gbuffer_framebuffer == 0u) return false;
+
+        GL30.glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_framebuffer);
+        GL30.glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D,
+            gbuffer_albedo,
+            0
+        );
+        GL30.glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT1,
+            GL_TEXTURE_2D,
+            gbuffer_normal,
+            0
+        );
+        GL30.glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_COLOR_ATTACHMENT2,
+            GL_TEXTURE_2D,
+            gbuffer_velocity,
+            0
+        );
+        GL30.glFramebufferTexture2D(
+            GL_FRAMEBUFFER,
+            GL_DEPTH_ATTACHMENT,
+            GL_TEXTURE_2D,
+            gbuffer_depth,
+            0
+        );
+
+        const GLenum attachments[] = {
+            GL_COLOR_ATTACHMENT0,
+            GL_COLOR_ATTACHMENT1,
+            GL_COLOR_ATTACHMENT2,
         };
-        build_node(build_node, 0u, 0u, static_cast<std::uint32_t>(build.size())); tlas_instances.reserve(build.size()); for (const BuildInstance& item : build) tlas_instances.push_back(item.instance);
+        GL20.glDrawBuffers(3, attachments);
+
+        const GLenum status = GL30.glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u);
+        if (status != GL_FRAMEBUFFER_COMPLETE) {
+            std::fprintf(stderr, "[GI]: GBuffer framebuffer incomplete: 0x%x\n", status);
+            return false;
+        }
+        return true;
     }
 
-    void updateAccelerationStructures(const Ecs::World& world)
+    void destroyGBuffer()
     {
-        for (const Ecs::Entity entity : world.entities()) { const Ecs::RenderableComponent *renderable = world.getRenderable(entity); const Ecs::MeshComponent *mesh = world.getMesh(entity); if (renderable && renderable->visible && mesh) ensureBlas(mesh->mesh); }
-        uploadBlasBuffers(); rebuildTlas(world); uploadBuffer(tlas_node_buffer, tlas_nodes, GL_DYNAMIC_DRAW); uploadBuffer(tlas_instance_buffer, tlas_instances, GL_DYNAMIC_DRAW);
+        if (gbuffer_framebuffer != 0u && GL30.glDeleteFramebuffers) {
+            GL30.glDeleteFramebuffers(1, &gbuffer_framebuffer);
+        }
+        gbuffer_framebuffer = 0u;
+        deleteTexture(gbuffer_albedo);
+        deleteTexture(gbuffer_normal);
+        deleteTexture(gbuffer_velocity);
+        deleteTexture(gbuffer_depth);
+    }
+
+    bool createGiBuffers()
+    {
+        raw = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
+
+        for (std::size_t i = 0u; i < 2u; ++i) {
+            history[i] = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
+            moments[i] = createTexture2D(gi_width, gi_height, GL_RG16F, GL_RG, GL_FLOAT, true);
+            geometry[i] = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, false);
+            denoise[i] = createTexture2D(gi_width, gi_height, GL_RGBA16F, GL_RGBA, GL_FLOAT, true);
+        }
+
+        if (raw == 0u) return false;
+        for (std::size_t i = 0u; i < 2u; ++i) {
+            if (history[i] == 0u || moments[i] == 0u || geometry[i] == 0u || denoise[i] == 0u) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void destroyGiBuffers()
+    {
+        deleteTexture(raw);
+        for (std::size_t i = 0u; i < 2u; ++i) {
+            deleteTexture(history[i]);
+            deleteTexture(moments[i]);
+            deleteTexture(geometry[i]);
+            deleteTexture(denoise[i]);
+        }
     }
 
     void beginGBuffer()
     {
-        GL30.glBindFramebuffer(GL_FRAMEBUFFER, gbuffer.framebuffer);
-        const GLenum attachments[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3}; GL20.glDrawBuffers(4, attachments);
-        glViewport(0, 0, width, height); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); GL20.glUseProgram(programs.gbuffer);
-        setInt(programs.gbuffer, "uDiffuse", 0); setMatrix(programs.gbuffer, "uInverseView", inverse_view); setMatrix(programs.gbuffer, "uPreviousViewProjection", previous_view_projection);
+        GL30.glBindFramebuffer(GL_FRAMEBUFFER, gbuffer_framebuffer);
+        const GLenum attachments[] = {
+            GL_COLOR_ATTACHMENT0,
+            GL_COLOR_ATTACHMENT1,
+            GL_COLOR_ATTACHMENT2,
+        };
+        GL20.glDrawBuffers(3, attachments);
+        glViewport(0, 0, width, height);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        GL20.glUseProgram(gbuffer_program);
+        setInt(gbuffer_program, "uDiffuse", 0);
+        setMatrix(gbuffer_program, "uInverseView", inverse_view);
+        setMatrix(gbuffer_program, "uPreviousViewProjection", previous_view_projection);
     }
 
     void endGBuffer()
     {
-        GL20.glUseProgram(0u); GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u); GL42.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        GL20.glUseProgram(0u);
+        GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u);
+        GL42.glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        glClearColor(0.035f, 0.035f, 0.045f, 1.0f);
     }
 
-    void updateSurface()
+    void trace()
     {
-        GL20.glUseProgram(programs.surface); bindTextureUnit(0, gbuffer.albedo); bindTextureUnit(1, gbuffer.normal); bindTextureUnit(2, gbuffer.depth);
-        setInt(programs.surface, "uAlbedo", 0); setInt(programs.surface, "uNormal", 1); setInt(programs.surface, "uDepth", 2); setSize(programs.surface, "uOutputSize", gi_width, gi_height);
-        GL42.glBindImageTexture(0, surface.radiance, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); GL43.glDispatchCompute(static_cast<GLuint>((gi_width + 7) / 8), static_cast<GLuint>((gi_height + 7) / 8), 1u); GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        GL20.glUseProgram(trace_program);
+        bindTextureUnit(0, gbuffer_albedo);
+        bindTextureUnit(1, gbuffer_normal);
+        bindTextureUnit(2, gbuffer_depth);
+
+        setInt(trace_program, "uAlbedo", 0);
+        setInt(trace_program, "uNormal", 1);
+        setInt(trace_program, "uDepth", 2);
+        setMatrix(trace_program, "uViewProjection", current_view_projection);
+        setMatrix(trace_program, "uInverseViewProjection", inverse_view_projection);
+        setSize(trace_program, "uOutputSize", gi_width, gi_height);
+        setInt(trace_program, "uFrame", static_cast<int>(frame & 0x7fffffffu));
+        setInt(trace_program, "uNodeCount", static_cast<int>(nodes.size()));
+        setInt(trace_program, "uUseScreen", settings.screen_space_first ? 1 : 0);
+        setInt(trace_program, "uUseBvh", settings.bvh_fallback ? 1 : 0);
+        setInt(trace_program, "uRaysPerPixel", std::clamp(settings.rays_per_pixel, 1, 4));
+        setInt(trace_program, "uMaxBounces", std::clamp(settings.max_bounces, 1, 4));
+
+        GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0u, node_buffer);
+        GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1u, triangle_buffer);
+        GL42.glBindImageTexture(0u, raw, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        GL43.glDispatchCompute(
+            static_cast<GLuint>((gi_width + 7) / 8),
+            static_cast<GLuint>((gi_height + 7) / 8),
+            1u
+        );
+        GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
     }
 
-    void traceGi()
+    GLuint temporal()
     {
-        GL20.glUseProgram(programs.trace); bindTextureUnit(0, gbuffer.albedo); bindTextureUnit(1, gbuffer.normal); bindTextureUnit(2, gbuffer.depth); bindTextureUnit(3, surface.radiance);
-        setInt(programs.trace, "uAlbedo", 0); setInt(programs.trace, "uNormal", 1); setInt(programs.trace, "uDepth", 2); setInt(programs.trace, "uSurface", 3); setMatrix(programs.trace, "uViewProjection", current_view_projection); setMatrix(programs.trace, "uInverseViewProjection", inverse_view_projection); setSize(programs.trace, "uOutputSize", gi_width, gi_height);
-        setInt(programs.trace, "uFrame", static_cast<int>(frame & 0x7fffffffu)); setInt(programs.trace, "uTlasNodeCount", static_cast<int>(tlas_nodes.size())); setInt(programs.trace, "uUseScreen", settings.screen_space_first ? 1 : 0); setInt(programs.trace, "uUseBvh", settings.bvh_fallback ? 1 : 0); setInt(programs.trace, "uUseSurface", settings.surface_cache ? 1 : 0); setInt(programs.trace, "uRaysPerPixel", std::clamp(settings.rays_per_pixel, 1, 4)); setInt(programs.trace, "uMaxBounces", std::clamp(settings.max_bounces, 1, 4));
-        GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0u, blas_node_buffer); GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1u, triangle_buffer); GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2u, tlas_node_buffer); GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3u, tlas_instance_buffer); GL30.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4u, blas_metadata_buffer);
-        GL42.glBindImageTexture(0, buffers.raw, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); GL42.glBindImageTexture(1, buffers.hit_distance, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R16F); GL43.glDispatchCompute(static_cast<GLuint>((gi_width + 7) / 8), static_cast<GLuint>((gi_height + 7) / 8), 1u); GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        const int next = history_index ^ 1;
+        GL20.glUseProgram(temporal_program);
+
+        bindTextureUnit(0, raw);
+        bindTextureUnit(1, history[history_index]);
+        bindTextureUnit(2, moments[history_index]);
+        bindTextureUnit(3, geometry[history_index]);
+        bindTextureUnit(4, gbuffer_depth);
+        bindTextureUnit(5, gbuffer_normal);
+        bindTextureUnit(6, gbuffer_velocity);
+
+        setInt(temporal_program, "uRaw", 0);
+        setInt(temporal_program, "uPreviousHistory", 1);
+        setInt(temporal_program, "uPreviousMoments", 2);
+        setInt(temporal_program, "uPreviousGeometry", 3);
+        setInt(temporal_program, "uDepth", 4);
+        setInt(temporal_program, "uNormal", 5);
+        setInt(temporal_program, "uVelocity", 6);
+        setSize(temporal_program, "uOutputSize", gi_width, gi_height);
+        setFloat(temporal_program, "uAlpha", settings.temporal_alpha);
+        setFloat(temporal_program, "uDepthReject", settings.depth_rejection);
+        setFloat(temporal_program, "uNormalReject", settings.normal_rejection);
+        setInt(temporal_program, "uHasHistory", frame > 0u ? 1 : 0);
+
+        GL42.glBindImageTexture(0u, history[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        GL42.glBindImageTexture(1u, moments[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16F);
+        GL42.glBindImageTexture(2u, geometry[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+        GL43.glDispatchCompute(
+            static_cast<GLuint>((gi_width + 7) / 8),
+            static_cast<GLuint>((gi_height + 7) / 8),
+            1u
+        );
+        GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+        return history[next];
     }
 
-    GLuint temporalGi()
+    GLuint filter(GLuint source)
     {
-        const int next = history_index ^ 1; GL20.glUseProgram(programs.temporal);
-        bindTextureUnit(0, buffers.raw); bindTextureUnit(1, buffers.history[history_index]); bindTextureUnit(2, buffers.moments[history_index]); bindTextureUnit(3, buffers.geometry[history_index]); bindTextureUnit(4, gbuffer.depth); bindTextureUnit(5, gbuffer.normal); bindTextureUnit(6, gbuffer.velocity);
-        setInt(programs.temporal, "uRaw", 0); setInt(programs.temporal, "uPreviousHistory", 1); setInt(programs.temporal, "uPreviousMoments", 2); setInt(programs.temporal, "uPreviousGeometry", 3); setInt(programs.temporal, "uDepth", 4); setInt(programs.temporal, "uNormal", 5); setInt(programs.temporal, "uVelocity", 6); setSize(programs.temporal, "uOutputSize", gi_width, gi_height); setFloat(programs.temporal, "uAlpha", settings.temporal_alpha); setFloat(programs.temporal, "uDepthReject", settings.depth_rejection); setFloat(programs.temporal, "uNormalReject", settings.normal_rejection); setInt(programs.temporal, "uHasHistory", frame > 0u ? 1 : 0);
-        GL42.glBindImageTexture(0, buffers.history[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); GL42.glBindImageTexture(1, buffers.moments[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG16F); GL42.glBindImageTexture(2, buffers.geometry[next], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); GL43.glDispatchCompute(static_cast<GLuint>((gi_width + 7) / 8), static_cast<GLuint>((gi_height + 7) / 8), 1u); GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-        return buffers.history[next];
-    }
-
-    GLuint denoiseGi(GLuint source)
-    {
-        const int moment_index = settings.temporal_reuse ? (history_index ^ 1) : history_index;
-        GLuint input = source, output = buffers.denoised;
+        GLuint input = source;
         const int iterations = std::clamp(settings.denoise_iterations, 1, 6);
+        const int moment_index = settings.temporal_reuse ? (history_index ^ 1) : history_index;
+
         for (int iteration = 0; iteration < iterations; ++iteration) {
-            output = (iteration & 1) == 0 ? buffers.denoised : buffers.temporary; GL20.glUseProgram(programs.denoise);
-            bindTextureUnit(0, input); bindTextureUnit(1, gbuffer.depth); bindTextureUnit(2, gbuffer.normal); bindTextureUnit(3, buffers.moments[moment_index]);
-            setInt(programs.denoise, "uInput", 0); setInt(programs.denoise, "uDepth", 1); setInt(programs.denoise, "uNormal", 2); setInt(programs.denoise, "uMoments", 3); setSize(programs.denoise, "uOutputSize", gi_width, gi_height); setInt(programs.denoise, "uStep", 1 << iteration); setInt(programs.denoise, "uUseMoments", settings.temporal_reuse ? 1 : 0);
-            GL42.glBindImageTexture(0, output, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F); GL43.glDispatchCompute(static_cast<GLuint>((gi_width + 7) / 8), static_cast<GLuint>((gi_height + 7) / 8), 1u); GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT); input = output;
+            const GLuint output = denoise[static_cast<std::size_t>(iteration & 1)];
+            GL20.glUseProgram(denoise_program);
+            bindTextureUnit(0, input);
+            bindTextureUnit(1, gbuffer_depth);
+            bindTextureUnit(2, gbuffer_normal);
+            bindTextureUnit(3, moments[static_cast<std::size_t>(moment_index)]);
+
+            setInt(denoise_program, "uInput", 0);
+            setInt(denoise_program, "uDepth", 1);
+            setInt(denoise_program, "uNormal", 2);
+            setInt(denoise_program, "uMoments", 3);
+            setSize(denoise_program, "uOutputSize", gi_width, gi_height);
+            setInt(denoise_program, "uStep", 1 << iteration);
+            setInt(denoise_program, "uUseMoments", settings.temporal_reuse ? 1 : 0);
+
+            GL42.glBindImageTexture(0u, output, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+            GL43.glDispatchCompute(
+                static_cast<GLuint>((gi_width + 7) / 8),
+                static_cast<GLuint>((gi_height + 7) / 8),
+                1u
+            );
+            GL42.glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
+            input = output;
         }
-        return output;
+
+        return input;
     }
 
-    void compose(GLuint gi_texture)
+    void compose(GLuint lighting)
     {
-        GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u); glViewport(0, 0, width, height); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE); glDisable(GL_LIGHTING); glDisable(GL_BLEND); GL20.glUseProgram(programs.compose);
-        bindTextureUnit(0, gbuffer.albedo); bindTextureUnit(1, gbuffer.normal); bindTextureUnit(2, gbuffer.depth); bindTextureUnit(3, gi_texture);
-        setInt(programs.compose, "uAlbedo", 0); setInt(programs.compose, "uNormal", 1); setInt(programs.compose, "uDepth", 2); setInt(programs.compose, "uGi", 3);
-        glBegin(GL_TRIANGLES); glVertex2f(-1.0f, -1.0f); glVertex2f(3.0f, -1.0f); glVertex2f(-1.0f, 3.0f); glEnd();
-        GL20.glUseProgram(0u); GLModern.glActiveTexture(GL_TEXTURE0); glEnable(GL_DEPTH_TEST); glEnable(GL_CULL_FACE); glEnable(GL_LIGHTING); glEnable(GL_COLOR_MATERIAL);
+        GL30.glBindFramebuffer(GL_FRAMEBUFFER, 0u);
+        glViewport(0, 0, width, height);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_BLEND);
+
+        GL20.glUseProgram(compose_program);
+        bindTextureUnit(0, gbuffer_albedo);
+        bindTextureUnit(1, gbuffer_depth);
+        bindTextureUnit(2, lighting);
+        setInt(compose_program, "uAlbedo", 0);
+        setInt(compose_program, "uDepth", 1);
+        setInt(compose_program, "uLighting", 2);
+
+        glBegin(GL_TRIANGLES);
+        glVertex2f(-1.0f, -1.0f);
+        glVertex2f(3.0f, -1.0f);
+        glVertex2f(-1.0f, 3.0f);
+        glEnd();
+
+        GL20.glUseProgram(0u);
+        GLModern.glActiveTexture(GL_TEXTURE0);
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_LIGHTING);
+        glEnable(GL_COLOR_MATERIAL);
     }
 
-    void deleteBuffers()
+    void destroyGeometryBuffers()
     {
-        GLuint *handles[] = {&blas_node_buffer, &triangle_buffer, &blas_metadata_buffer, &tlas_node_buffer, &tlas_instance_buffer};
-        for (GLuint *handle : handles) { if (*handle != 0u) GL15.glDeleteBuffers(1, handle); *handle = 0u; }
+        if (!GL15.glDeleteBuffers) return;
+        if (node_buffer != 0u) GL15.glDeleteBuffers(1, &node_buffer);
+        if (triangle_buffer != 0u) GL15.glDeleteBuffers(1, &triangle_buffer);
+        node_buffer = 0u;
+        triangle_buffer = 0u;
     }
 };
-
-static_assert(sizeof(GI::Impl::BvhNode) == 32u);
-static_assert(sizeof(GI::Impl::GpuTriangle) == 128u);
-static_assert(sizeof(GI::Impl::TlasInstance) == 192u);
 
 GI::GI() : impl_(new Impl) {}
 
@@ -1100,64 +1602,179 @@ GI::~GI()
 bool GI::init(int width, int height)
 {
     if (impl_->initialized) return true;
-    impl_->width = std::max(width, 1); impl_->height = std::max(height, 1); impl_->updateResolution();
-    if (!lwcglModernGLAvailable() && lwcglLoadModernGL() != 0) { std::fprintf(stderr, "[GI]: modern OpenGL unavailable\n"); return false; }
-    const int major = lwcglModernGLMajorVersion(), minor = lwcglModernGLMinorVersion();
-    if (major < 4 || (major == 4 && minor < 3) || !GL43.glDispatchCompute || !GL42.glBindImageTexture) {
-        std::fprintf(stderr, "[GI]: OpenGL 4.3 compatibility context required; found %d.%d\n", major, minor);
+
+    impl_->width = std::max(width, 1);
+    impl_->height = std::max(height, 1);
+    impl_->updateResolution();
+
+    if (!lwcglModernGLAvailable() && lwcglLoadModernGL() != 0) {
+        std::fprintf(stderr, "[GI]: modern OpenGL unavailable\n");
         return false;
     }
-    if (!impl_->createPrograms() || !impl_->createGBuffer() || !impl_->createGiBuffers() || !impl_->createSurface()) { shutdown(); return false; }
-    impl_->history_index = 0; impl_->frame = 0u; impl_->initialized = true; return true;
+
+    const int major = lwcglModernGLMajorVersion();
+    const int minor = lwcglModernGLMinorVersion();
+    if (
+        major < 4 ||
+        (major == 4 && minor < 3) ||
+        !GL43.glDispatchCompute ||
+        !GL42.glBindImageTexture ||
+        !GL30.glBindBufferBase)
+    {
+        std::fprintf(
+            stderr,
+            "[GI]: OpenGL 4.3 compatibility context required; found %d.%d\n",
+            major,
+            minor
+        );
+        return false;
+    }
+
+    if (!impl_->createPrograms() || !impl_->createGBuffer() || !impl_->createGiBuffers()) {
+        shutdown();
+        return false;
+    }
+
+    impl_->history_index = 0;
+    impl_->frame = 0u;
+    impl_->geometry_ready = false;
+    impl_->initialized = true;
+
+    std::fprintf(
+        stderr,
+        "[GI]: initialized OpenGL %d.%d, framebuffer %dx%d, GI %dx%d\n",
+        major,
+        minor,
+        impl_->width,
+        impl_->height,
+        impl_->gi_width,
+        impl_->gi_height
+    );
+    return true;
 }
 
 void GI::resize(int width, int height)
 {
-    impl_->width = std::max(width, 1); impl_->height = std::max(height, 1); impl_->updateResolution();
+    const int new_width = std::max(width, 1);
+    const int new_height = std::max(height, 1);
+    if (new_width == impl_->width && new_height == impl_->height) return;
+
+    impl_->width = new_width;
+    impl_->height = new_height;
+    impl_->updateResolution();
     if (!impl_->initialized) return;
-    impl_->destroyGBuffer(); impl_->destroyGiBuffers(); impl_->destroySurface();
-    if (!impl_->createGBuffer() || !impl_->createGiBuffers() || !impl_->createSurface()) { shutdown(); return; }
-    impl_->history_index = 0; impl_->frame = 0u;
+
+    impl_->destroyGBuffer();
+    impl_->destroyGiBuffers();
+    if (!impl_->createGBuffer() || !impl_->createGiBuffers()) {
+        shutdown();
+        return;
+    }
+
+    impl_->history_index = 0;
+    impl_->frame = 0u;
 }
 
 void GI::begin(const Ecs::World& world)
 {
     if (!impl_->active()) return;
-    Mat4 projection{}, view{}; glGetFloatv(GL_PROJECTION_MATRIX, projection.data()); glGetFloatv(GL_MODELVIEW_MATRIX, view.data());
-    const Mat4 captured = multiply(projection, view); impl_->previous_view_projection = impl_->frame == 0u ? captured : impl_->current_view_projection; impl_->current_view_projection = captured;
-    if (!inverseMatrix(captured, impl_->inverse_view_projection)) impl_->inverse_view_projection = identityMatrix();
-    if (!inverseMatrix(view, impl_->inverse_view)) impl_->inverse_view = identityMatrix();
-    impl_->updateAccelerationStructures(world); impl_->beginGBuffer();
+
+    Mat4 projection{};
+    Mat4 view{};
+    glGetFloatv(GL_PROJECTION_MATRIX, projection.data());
+    glGetFloatv(GL_MODELVIEW_MATRIX, view.data());
+
+    const Mat4 captured = multiply(projection, view);
+    impl_->previous_view_projection = impl_->frame == 0u
+        ? captured
+        : impl_->current_view_projection;
+    impl_->current_view_projection = captured;
+
+    if (!inverseMatrix(captured, impl_->inverse_view_projection)) {
+        impl_->inverse_view_projection = identityMatrix();
+    }
+    if (!inverseMatrix(view, impl_->inverse_view)) {
+        impl_->inverse_view = identityMatrix();
+    }
+
+    if (!impl_->rebuildGeometry(world)) {
+        std::fprintf(stderr, "[GI]: failed to rebuild world BVH\n");
+        impl_->settings.enabled = false;
+        return;
+    }
+
+    impl_->beginGBuffer();
 }
 
 void GI::bindMaterial(unsigned int texture_id)
 {
     if (!impl_->active()) return;
-    GL20.glUseProgram(impl_->programs.gbuffer); bindTextureUnit(0, static_cast<GLuint>(texture_id)); setInt(impl_->programs.gbuffer, "uDiffuse", 0); setInt(impl_->programs.gbuffer, "uHasTexture", texture_id != 0u ? 1 : 0); glDisable(GL_BLEND);
+
+    GL20.glUseProgram(impl_->gbuffer_program);
+    bindTextureUnit(0, static_cast<GLuint>(texture_id));
+    setInt(impl_->gbuffer_program, "uDiffuse", 0);
+    setInt(impl_->gbuffer_program, "uHasTexture", texture_id != 0u ? 1 : 0);
+    glDisable(GL_BLEND);
 }
 
 void GI::end(const Ecs::World& world)
 {
     (void)world;
     if (!impl_->active()) return;
-    impl_->endGBuffer(); if (impl_->settings.surface_cache) impl_->updateSurface(); impl_->traceGi();
-    GLuint result = impl_->buffers.raw; if (impl_->settings.temporal_reuse) result = impl_->temporalGi(); if (impl_->settings.denoise) result = impl_->denoiseGi(result);
-    impl_->buffers.final_texture = result; impl_->compose(result); if (impl_->settings.temporal_reuse) impl_->history_index ^= 1; ++impl_->frame;
+
+    impl_->endGBuffer();
+    impl_->trace();
+
+    GLuint result = impl_->raw;
+    if (impl_->settings.temporal_reuse) result = impl_->temporal();
+    if (impl_->settings.denoise) result = impl_->filter(result);
+
+    impl_->compose(result);
+    if (impl_->settings.temporal_reuse) impl_->history_index ^= 1;
+    ++impl_->frame;
 }
 
 void GI::shutdown()
 {
     if (!impl_) return;
+
     if (GL20.glUseProgram) GL20.glUseProgram(0u);
-    impl_->destroyPrograms(); impl_->destroySurface(); impl_->destroyGiBuffers(); impl_->destroyGBuffer(); impl_->deleteBuffers();
-    impl_->blas_cache.clear(); impl_->global_blas_nodes.clear(); impl_->global_triangles.clear(); impl_->blas_metadata.clear(); impl_->tlas_nodes.clear(); impl_->tlas_instances.clear();
-    impl_->initialized = false; impl_->frame = 0u; impl_->history_index = 0; impl_->blas_buffers_dirty = true;
+    impl_->destroyPrograms();
+    impl_->destroyGiBuffers();
+    impl_->destroyGBuffer();
+    impl_->destroyGeometryBuffers();
+    impl_->nodes.clear();
+    impl_->triangles.clear();
+    impl_->initialized = false;
+    impl_->geometry_ready = false;
+    impl_->geometry_hash = 0u;
+    impl_->history_index = 0;
+    impl_->frame = 0u;
 }
 
-bool GI::initialized() const { return impl_->initialized; }
-bool GI::enabled() const { return impl_->settings.enabled; }
-void GI::setEnabled(bool enabled) { impl_->settings.enabled = enabled; }
-GiSettings& GI::settings() { return impl_->settings; }
-const GiSettings& GI::settings() const { return impl_->settings; }
+bool GI::initialized() const
+{
+    return impl_->initialized;
+}
+
+bool GI::enabled() const
+{
+    return impl_->settings.enabled;
+}
+
+void GI::setEnabled(bool enabled)
+{
+    impl_->settings.enabled = enabled;
+}
+
+GiSettings& GI::settings()
+{
+    return impl_->settings;
+}
+
+const GiSettings& GI::settings() const
+{
+    return impl_->settings;
+}
 
 } // namespace Renderer
