@@ -20,6 +20,8 @@ constexpr Entity INVALID_ENTITY = UINT32_MAX;
 
 class World {
 private:
+    static constexpr std::size_t missing_entity = std::numeric_limits<std::size_t>::max();
+
     struct StorageBase {
         virtual ~StorageBase() = default;
         virtual void remove(Entity entity) = 0;
@@ -101,10 +103,11 @@ private:
 
 public:
     Entity createEntity();
+    bool destroyEntity(Entity entity);
 
     bool alive(Entity entity) const
     {
-        return entity < entities_.size() && entities_[entity] == entity;
+        return entity < entity_sparse_.size() && entity_sparse_[entity] != missing_entity;
     }
 
     template <typename T, typename... Args>
@@ -212,6 +215,7 @@ public:
     }
 
     const std::vector<Entity>& entities() const { return entities_; }
+    std::size_t size() const { return entities_.size(); }
 
     std::uint64_t changeRevision() const { return change_revision_; }
     void markChanged() { touch(); }
@@ -251,7 +255,9 @@ private:
 
     void touch() { ++change_revision_; }
 
+    Entity next_entity_ = 0u;
     std::vector<Entity> entities_;
+    std::vector<std::size_t> entity_sparse_;
     std::unordered_map<std::type_index, std::unique_ptr<StorageBase>> storages_;
     std::uint64_t change_revision_ = 1u;
 };
