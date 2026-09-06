@@ -47,6 +47,7 @@ void build(C_Build *b)
 
     c_sources(library, "Sources/*.cpp");
     c_sources(library, "Sources/*/*.cpp");
+    c_sources(library, "Sources/*/*/*.cpp");
 
     c_flag(library, "-std=c++20");
     configureLibrary(library);
