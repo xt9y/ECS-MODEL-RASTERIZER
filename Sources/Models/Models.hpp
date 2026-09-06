@@ -1,8 +1,8 @@
 #ifndef RW_ENGINE_MODELS_HPP
 #define RW_ENGINE_MODELS_HPP
 
-#include "Models/Material.hpp"
-#include "Models/Types.hpp"
+#include "Models/Core/Material.hpp"
+#include "Models/Core/Types.hpp"
 
 #include <cstddef>
 #include <cstdint>
