@@ -1,12 +1,14 @@
 #ifndef RW_ENGINE_MODELS_HPP
 #define RW_ENGINE_MODELS_HPP
 
+#include "Animation/Animation.hpp"
 #include "Models/Core/Material.hpp"
 #include "Models/Core/Types.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Models {
@@ -23,6 +25,7 @@ struct Vertex {
     Vec3 position;
     Vec3 normal {0.0f, 0.0f, 1.0f};
     Vec2 uv;
+    Animation::SkinWeights skin;
 };
 
 struct Bounds {
@@ -46,6 +49,13 @@ const ModelPart *part(ModelHandle model, std::size_t index);
 const MeshData *mesh(MeshHandle handle);
 const MaterialData *material(MaterialHandle handle);
 std::size_t partCount(ModelHandle model);
+
+Animation::SkeletonHandle skeleton(ModelHandle model);
+std::size_t animationCount(ModelHandle model);
+Animation::ClipHandle animation(ModelHandle model, std::size_t index);
+Animation::ClipHandle animation(ModelHandle model, std::string_view name);
+bool animated(ModelHandle model);
+
 void clearCache();
 
 } // namespace Models
