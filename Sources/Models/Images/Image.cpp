@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <utility>
 
 namespace Models::Images {
 namespace {
