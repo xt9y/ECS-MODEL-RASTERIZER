@@ -21,6 +21,15 @@ struct TlasBuildResult {
 
 TlasBuildResult buildWideTlas(const std::vector<Bounds>& instance_bounds);
 
+// Preserves TLAS topology and leaf ordering while updating all quantized child
+// bounds from a new set of instance AABBs. This is the fast path for animated
+// BLAS bounds and moving instance transforms.
+bool refitWideTlas(
+    TlasBuildResult *tlas,
+    const std::vector<Bounds>& instance_bounds,
+    std::string *error = nullptr
+);
+
 } // namespace Renderer::PathTracerAccel
 
 #endif
