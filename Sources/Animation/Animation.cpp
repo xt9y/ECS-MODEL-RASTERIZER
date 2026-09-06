@@ -114,7 +114,6 @@ void evaluate(AnimatorComponent& animator, const Skeleton& skeleton_asset)
     animator.pose.local.resize(bone_count);
     animator.pose.global.resize(bone_count);
     animator.pose.skin.resize(bone_count);
-    animator.scratch.resize(bone_count);
 
     const AnimationClip *current = clip(animator.clip);
     const AnimationClip *next = clip(animator.next_clip);
@@ -133,7 +132,7 @@ void evaluate(AnimatorComponent& animator, const Skeleton& skeleton_asset)
                 *next,
                 bone,
                 animator.next_time,
-                animator.loop,
+                animator.next_loop,
                 bind
             );
             local = blend(local, target, blend_factor);
@@ -218,17 +217,21 @@ void play(
         animator.next_clip = INVALID_CLIP;
         animator.time = 0.0f;
         animator.next_time = 0.0f;
+        animator.speed = speed;
+        animator.next_speed = 1.0f;
         animator.blend_time = 0.0f;
         animator.blend_duration = 0.0f;
+        animator.loop = loop;
+        animator.next_loop = true;
     } else if (animator.clip != clip_handle) {
         animator.next_clip = clip_handle;
         animator.next_time = 0.0f;
+        animator.next_speed = speed;
+        animator.next_loop = loop;
         animator.blend_time = 0.0f;
         animator.blend_duration = std::max(blend_seconds, 0.0f);
     }
 
-    animator.loop = loop;
-    animator.speed = speed;
     animator.playing = true;
 }
 
@@ -259,13 +262,15 @@ void System::update(Ecs::World& world, float delta_seconds) const
             const Skeleton *skeleton_asset = skeleton(animator.skeleton);
             if (!skeleton_asset) return;
 
+            const bool needs_initial_pose = animator.pose.skin.size() != skeleton_asset->bones.size();
+            if (!animator.playing && !needs_initial_pose) return;
+
+            const float safe_delta = std::max(delta_seconds, 0.0f);
             if (animator.playing) {
-                const float safe_delta = std::max(delta_seconds, 0.0f);
-                const float scaled_delta = safe_delta * animator.speed;
-                animator.time += scaled_delta;
+                animator.time += safe_delta * animator.speed;
 
                 if (animator.next_clip != INVALID_CLIP) {
-                    animator.next_time += scaled_delta;
+                    animator.next_time += safe_delta * animator.next_speed;
                     animator.blend_time += safe_delta;
 
                     if (
@@ -274,14 +279,29 @@ void System::update(Ecs::World& world, float delta_seconds) const
                     {
                         animator.clip = animator.next_clip;
                         animator.time = animator.next_time;
+                        animator.speed = animator.next_speed;
+                        animator.loop = animator.next_loop;
                         animator.next_clip = INVALID_CLIP;
+                        animator.next_time = 0.0f;
+                        animator.next_speed = 1.0f;
+                        animator.next_loop = true;
                         animator.blend_time = 0.0f;
                         animator.blend_duration = 0.0f;
                     }
                 }
             }
 
+            bool stop_after_evaluate = false;
+            if (animator.playing && animator.next_clip == INVALID_CLIP && !animator.loop) {
+                const AnimationClip *current = clip(animator.clip);
+                if (current && current->duration > 0.0f && animator.time >= current->duration) {
+                    animator.time = current->duration;
+                    stop_after_evaluate = true;
+                }
+            }
+
             evaluate(animator, *skeleton_asset);
+            if (stop_after_evaluate) animator.playing = false;
             changed = true;
         }
     );
