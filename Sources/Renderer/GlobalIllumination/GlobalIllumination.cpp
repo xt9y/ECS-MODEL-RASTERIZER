@@ -5,6 +5,7 @@
 #include "Renderer/GlobalIllumination/TraceScene.hpp"
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneCache.hpp"
+#include "Renderer/ShadingState.hpp"
 
 #include <algorithm>
 #include <array>
@@ -94,6 +95,13 @@ Vec3 clampPositive(Vec3 value)
     };
 }
 
+float smoothStep(float edge0, float edge1, float value)
+{
+    if (edge1 <= edge0) return value >= edge1 ? 1.0f : 0.0f;
+    const float t = std::clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
 double elapsedMilliseconds(Clock::time_point start)
 {
     return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
@@ -115,14 +123,12 @@ struct SettingsState {
 struct State {
     const Ecs::World *world = nullptr;
     Scenes::Scene::RenderRevision render_revision{};
-    std::uint64_t lighting_revision = 0u;
     bool revisions_initialized = false;
-    std::uint64_t light_signature = 0u;
     std::uint64_t next_field_revision = 1u;
 
     std::uint8_t bounces = 0u;
     PhotonMapping::Settings photon_settings{};
-    Scenes::LightState light{};
+    Lighting::State lighting{};
     std::vector<Scenes::Scene::RenderItem> render_items;
     TraceScene trace_scene;
     PhotonMapping::PhotonMap photon_map;
@@ -175,38 +181,59 @@ bool photonSettingsEqual(
 
 Vec3 directIrradiance(const TraceHit& hit)
 {
-    if (!state.light.valid || state.light.intensity <= 0.0f) return {};
+    Vec3 result{};
+    for (const Scenes::LightState& light : state.lighting.lights) {
+        if (!light.valid || light.intensity <= 0.0f) continue;
 
-    Vec3 light_direction{};
-    float attenuation = 1.0f;
-    float shadow_distance = std::numeric_limits<float>::infinity();
+        Vec3 light_direction{};
+        float attenuation = 1.0f;
+        float shadow_distance = std::numeric_limits<float>::infinity();
+        const float bias = std::max(light.shadow_bias, tuning.ray_epsilon);
 
-    if (state.light.type == LightType::Directional) {
-        light_direction = multiply(normalize(state.light.direction), -1.0f);
-    } else {
-        const Vec3 to_light = subtract(state.light.position, hit.position);
-        const float distance_squared = std::max(lengthSquared(to_light), std::numeric_limits<float>::epsilon());
-        const float distance = std::sqrt(distance_squared);
-        light_direction = divide(to_light, distance);
-        attenuation = 1.0f / distance_squared;
-        shadow_distance = std::max(distance - tuning.ray_epsilon, 0.0f);
+        if (light.type == LightType::Directional) {
+            light_direction = multiply(normalize(light.direction), -1.0f);
+        } else {
+            const Vec3 to_light = subtract(light.position, hit.position);
+            const float distance_squared = std::max(
+                lengthSquared(to_light),
+                std::numeric_limits<float>::epsilon()
+            );
+            const float distance = std::sqrt(distance_squared);
+            light_direction = divide(to_light, distance);
+            attenuation = 1.0f / std::max(distance_squared, 1.0f);
+            shadow_distance = std::max(distance - bias, 0.0f);
+            if (light.range > 0.0f)
+                attenuation *= std::clamp(1.0f - distance / light.range, 0.0f, 1.0f);
+
+            if (light.type == LightType::Spot) {
+                const float radians = kPi / 180.0f;
+                const float inner = std::cos(light.inner_cone_degrees * radians);
+                const float outer = std::cos(light.outer_cone_degrees * radians);
+                const float cone = dot(multiply(light_direction, -1.0f), normalize(light.direction));
+                attenuation *= smoothStep(outer, inner, cone);
+            }
+        }
+
+        if (attenuation <= 0.0f) continue;
+        const float cosine = std::max(dot(hit.normal, light_direction), 0.0f);
+        if (cosine <= 0.0f) continue;
+
+        if (light.shadows) {
+            const Vec3 shadow_origin = add(hit.position, multiply(hit.normal, bias));
+            if (state.trace_scene.occluded(
+                shadow_origin,
+                light_direction,
+                shadow_distance,
+                tuning.ray_epsilon
+            )) continue;
+        }
+
+        result = add(result, multiply(
+            clampPositive(light.color),
+            light.intensity * attenuation * cosine
+        ));
     }
-
-    const float cosine = std::max(dot(hit.normal, light_direction), 0.0f);
-    if (cosine <= 0.0f) return {};
-
-    const Vec3 shadow_origin = add(hit.position, multiply(hit.normal, tuning.ray_epsilon));
-    if (state.trace_scene.occluded(
-        shadow_origin,
-        light_direction,
-        shadow_distance,
-        tuning.ray_epsilon
-    )) return {};
-
-    return multiply(
-        clampPositive(state.light.color),
-        state.light.intensity * attenuation * cosine
-    );
+    return result;
 }
 
 std::size_t probeIndex(const Field& field, std::uint32_t x, std::uint32_t y, std::uint32_t z)
@@ -480,11 +507,11 @@ const Field *update(const Ecs::World& world)
     }
 
     bool scene_changed = false;
-    bool light_changed = false;
     const Scenes::Scene::RenderRevision render_revision = Scenes::Scene::renderRevision(world);
-    const std::uint64_t lighting_revision = world.changeRevision(Ecs::ChangeKind::Lighting);
+    const Lighting::State& lighting = Internal::shadingState().lighting;
     const bool render_dirty = !state.revisions_initialized || render_revision != state.render_revision;
-    const bool lighting_dirty = !state.revisions_initialized || lighting_revision != state.lighting_revision;
+    const bool lighting_dirty = !state.revisions_initialized || lighting.revision != state.lighting.revision;
+    const bool light_changed = lighting_dirty;
     if (render_dirty || lighting_dirty) {
         const bool first_sync = !state.revisions_initialized;
         if (render_dirty) {
@@ -512,14 +539,9 @@ const Field *update(const Ecs::World& world)
             state.scene_build_ms = elapsedMilliseconds(started);
         }
 
-        const Scenes::LightState light = Scenes::lightState(Scenes::Scene::lightState(world));
-        const std::uint64_t light_signature = Scenes::lightSignature(light);
-        light_changed = first_sync || light_signature != state.light_signature;
         state.render_revision = render_revision;
-        state.lighting_revision = lighting_revision;
+        state.lighting = lighting;
         state.revisions_initialized = true;
-        state.light = light;
-        if (light_changed) state.light_signature = light_signature;
     }
 
     if (!settings.valid) {
@@ -551,7 +573,7 @@ const Field *update(const Ecs::World& world)
         state.photon_settings = photon_settings;
         const Clock::time_point started = Clock::now();
         if (photon_settings.enabled) {
-            state.photon_map.rebuild(state.trace_scene, state.light, photon_settings);
+            state.photon_map.rebuild(state.trace_scene, state.lighting, photon_settings);
         } else {
             state.photon_map.clear();
         }
