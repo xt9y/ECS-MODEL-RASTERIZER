@@ -55,6 +55,9 @@ void build(C_Build *b)
     c_dep_sources(imgui, "imgui_widgets.cpp");
     c_dep_sources(imgui, "backends/imgui_impl_sdl3.cpp");
     c_dep_sources(imgui, "backends/imgui_impl_sdlgpu3.cpp");
+#ifndef _WIN32
+    c_dep_flag(imgui, "-fPIC");
+#endif
 #ifdef __APPLE__
     c_dep_flag(imgui, "-I/opt/homebrew/include");
 #endif
