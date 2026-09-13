@@ -44,6 +44,8 @@ public:
     std::size_t nodeCount() const { return scene_.nodes().size(); }
     std::size_t materialCount() const { return materials_.materials().size(); }
     std::size_t textureCount() const { return materials_.textureHandles().size(); }
+    SDL_GPUBuffer *nodeBuffer() const { return nodes_; }
+    SDL_GPUBuffer *triangleBuffer() const { return triangles_; }
     bool hasEnvironmentTexture() const;
 
 private:
