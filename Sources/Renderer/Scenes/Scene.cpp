@@ -175,13 +175,6 @@ void collectLights(const Ecs::World& world, std::vector<LightState>& out)
     }
 }
 
-LightState lightState(const Ecs::World& world)
-{
-    std::vector<LightState> lights;
-    collectLights(world, lights);
-    return lights.empty() ? LightState{} : lights.front();
-}
-
 RenderRevision renderRevision(const Ecs::World& world)
 {
     bool camera_dependent_lod = false;
