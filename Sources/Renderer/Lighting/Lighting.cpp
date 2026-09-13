@@ -60,9 +60,4 @@ std::uint64_t signature(const State& state)
     return hash;
 }
 
-const Scenes::LightState *primary(const State& state)
-{
-    return state.lights.empty() ? nullptr : &state.lights.front();
-}
-
 } // namespace Renderer::Lighting
