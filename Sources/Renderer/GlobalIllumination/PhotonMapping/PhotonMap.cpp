@@ -1,5 +1,7 @@
 #include "Renderer/GlobalIllumination/PhotonMapping/PhotonMap.hpp"
 
+#include "Renderer/Lighting/Lighting.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -47,6 +49,14 @@ struct DirectionalEmissionDomain {
     float across = 0.0f;
     float vertical = 0.0f;
     float area = 0.0f;
+};
+
+struct EmissionSource {
+    const Scenes::LightState *light = nullptr;
+    DirectionalEmissionDomain directional{};
+    float measure = 0.0f;
+    float weight = 0.0f;
+    std::uint32_t photon_count = 0u;
 };
 
 Vec3 add(Vec3 a, Vec3 b)
@@ -100,6 +110,15 @@ float maximumComponent(Vec3 value)
     return std::max({value.x, value.y, value.z});
 }
 
+Vec3 positive(Vec3 value)
+{
+    return {
+        std::max(value.x, 0.0f),
+        std::max(value.y, 0.0f),
+        std::max(value.z, 0.0f),
+    };
+}
+
 float random01(std::uint32_t& state)
 {
     state = state * 1664525u + 1013904223u;
@@ -147,6 +166,28 @@ float radicalInverse(std::uint32_t value, std::uint32_t base)
         factor *= inverse_base;
     }
     return result;
+}
+
+Vec3 coneDirection(Vec3 axis, float outer_degrees, std::uint32_t index)
+{
+    axis = normalize(axis);
+    const float radians = std::clamp(outer_degrees, 0.0f, 179.0f) * (kPi / 180.0f);
+    const float minimum_cosine = std::cos(radians);
+    const float u = radicalInverse(index + 1u, 2u);
+    const float v = radicalInverse(index + 1u, 3u);
+    const float cosine = 1.0f - u * (1.0f - minimum_cosine);
+    const float sine = std::sqrt(std::max(1.0f - cosine * cosine, 0.0f));
+    const float angle = 2.0f * kPi * v;
+    const Vec3 helper = std::abs(axis.y) < 0.999f
+        ? Vec3{0.0f, 1.0f, 0.0f}
+        : Vec3{1.0f, 0.0f, 0.0f};
+    const Vec3 tangent = normalize(cross(helper, axis));
+    const Vec3 bitangent = cross(axis, tangent);
+    return normalize(add(
+        add(multiply(tangent, std::cos(angle) * sine),
+            multiply(bitangent, std::sin(angle) * sine)),
+        multiply(axis, cosine)
+    ));
 }
 
 Cell cellFor(Vec3 position, float size)
@@ -222,6 +263,54 @@ void directionalEmission(
     );
 }
 
+float emissionMeasure(
+    const Scenes::LightState& light,
+    const DirectionalEmissionDomain& directional)
+{
+    if (light.type == LightType::Directional) return directional.area;
+    if (light.type == LightType::Spot) {
+        const float radians = std::clamp(light.outer_cone_degrees, 0.0f, 179.0f) * (kPi / 180.0f);
+        return std::max(2.0f * kPi * (1.0f - std::cos(radians)), 1.0e-6f);
+    }
+    return 4.0f * kPi;
+}
+
+std::vector<EmissionSource> emissionSources(
+    const TraceBounds& bounds,
+    const Lighting::State& lighting,
+    std::uint32_t photon_count)
+{
+    std::vector<EmissionSource> sources;
+    float total_weight = 0.0f;
+    for (const Scenes::LightState& light : lighting.lights) {
+        const Vec3 color = positive(light.color);
+        if (!light.valid || light.intensity <= 0.0f || maximumComponent(color) <= 0.0f) continue;
+        EmissionSource source;
+        source.light = &light;
+        if (light.type == LightType::Directional)
+            source.directional = directionalEmissionDomain(bounds, light.direction);
+        source.measure = emissionMeasure(light, source.directional);
+        source.weight = std::max(light.intensity, 0.0f) * source.measure * maximumComponent(color);
+        if (source.weight <= 0.0f) continue;
+        total_weight += source.weight;
+        sources.push_back(source);
+    }
+
+    if (sources.empty() || total_weight <= 0.0f || photon_count == 0u) return sources;
+    std::size_t source_index = 0u;
+    float cumulative = sources.front().weight;
+    for (std::uint32_t slot = 0u; slot < photon_count; ++slot) {
+        const float target = (static_cast<float>(slot) + 0.5f) /
+            static_cast<float>(photon_count) * total_weight;
+        while (source_index + 1u < sources.size() && target > cumulative) {
+            ++source_index;
+            cumulative += sources[source_index].weight;
+        }
+        ++sources[source_index].photon_count;
+    }
+    return sources;
+}
+
 } // namespace
 
 struct PhotonMap::Storage {
@@ -237,12 +326,12 @@ PhotonMap& PhotonMap::operator=(PhotonMap&&) noexcept = default;
 
 void PhotonMap::rebuild(
     const TraceScene& scene,
-    const Scenes::LightState& light,
+    const Lighting::State& lighting,
     const Settings& settings)
 {
     clear();
-    if (!storage_ || !settings.enabled || !light.valid || light.intensity <= 0.0f ||
-        scene.empty() || settings.photon_count == 0u || settings.bounces == 0u)
+    if (!storage_ || !settings.enabled || scene.empty() ||
+        settings.photon_count == 0u || settings.bounces == 0u)
     {
         return;
     }
@@ -255,55 +344,68 @@ void PhotonMap::rebuild(
         : autoRadius(scene_bounds, settings.photon_count);
     if (storage_->radius <= 0.0f) return;
 
+    std::vector<EmissionSource> sources = emissionSources(
+        scene_bounds, lighting, settings.photon_count);
+    if (sources.empty()) return;
+
     const std::uint8_t maximum_bounces = std::clamp<std::uint8_t>(settings.bounces, 1u, 8u);
     storage_->photons.reserve(static_cast<std::size_t>(settings.photon_count) * maximum_bounces);
 
-    const bool directional = light.type == LightType::Directional;
-    const DirectionalEmissionDomain domain = directional
-        ? directionalEmissionDomain(scene_bounds, light.direction)
-        : DirectionalEmissionDomain{};
-    const float emitted_power = std::max(light.intensity, 0.0f) *
-        (directional ? domain.area : 4.0f * kPi);
-    const Vec3 initial_power = multiply(
-        light.color,
-        emitted_power / static_cast<float>(settings.photon_count)
-    );
+    std::uint32_t global_index = 0u;
+    for (const EmissionSource& source : sources) {
+        if (!source.light || source.photon_count == 0u) continue;
+        const Scenes::LightState& light = *source.light;
+        const Vec3 initial_power = multiply(
+            positive(light.color),
+            std::max(light.intensity, 0.0f) * source.measure /
+                static_cast<float>(source.photon_count)
+        );
 
-    for (std::uint32_t photon_index = 0u; photon_index < settings.photon_count; ++photon_index) {
-        Vec3 origin{};
-        Vec3 direction{};
-        if (directional) {
-            directionalEmission(domain, photon_index, settings.ray_epsilon, origin, direction);
-        } else {
-            origin = light.position;
-            direction = fibonacciDirection(photon_index, settings.photon_count);
-        }
-
-        Vec3 power = initial_power;
-        std::uint32_t seed = photon_index * 747796405u + 2891336453u;
-        for (std::uint8_t bounce = 0u; bounce < maximum_bounces; ++bounce) {
-            const TraceHit hit = scene.traceClosest(
-                origin,
-                direction,
-                std::numeric_limits<float>::infinity(),
-                settings.ray_epsilon
-            );
-            if (!hit.found) break;
-
-            if (bounce > 0u) {
-                storage_->photons.push_back(Photon{
-                    .position = hit.position,
-                    .normal = hit.normal,
-                    .direction = direction,
-                    .power = power,
-                });
+        for (std::uint32_t photon_index = 0u; photon_index < source.photon_count;
+             ++photon_index, ++global_index)
+        {
+            Vec3 origin = light.position;
+            Vec3 direction{};
+            if (light.type == LightType::Directional) {
+                directionalEmission(
+                    source.directional,
+                    photon_index,
+                    settings.ray_epsilon,
+                    origin,
+                    direction
+                );
+            } else if (light.type == LightType::Spot) {
+                direction = coneDirection(light.direction, light.outer_cone_degrees, photon_index);
+            } else {
+                direction = fibonacciDirection(photon_index, source.photon_count);
             }
 
-            power = multiply(power, scene.albedo(hit));
-            if (maximumComponent(power) <= 1.0e-7f) break;
+            Vec3 power = initial_power;
+            std::uint32_t seed = global_index * 747796405u + 2891336453u;
+            for (std::uint8_t bounce = 0u; bounce < maximum_bounces; ++bounce) {
+                const TraceHit hit = scene.traceClosest(
+                    origin,
+                    direction,
+                    std::numeric_limits<float>::infinity(),
+                    settings.ray_epsilon
+                );
+                if (!hit.found) break;
 
-            direction = cosineHemisphere(hit.normal, seed);
-            origin = add(hit.position, multiply(hit.normal, settings.ray_epsilon * 4.0f));
+                if (bounce > 0u) {
+                    storage_->photons.push_back(Photon{
+                        .position = hit.position,
+                        .normal = hit.normal,
+                        .direction = direction,
+                        .power = power,
+                    });
+                }
+
+                power = multiply(power, scene.albedo(hit));
+                if (maximumComponent(power) <= 1.0e-7f) break;
+
+                direction = cosineHemisphere(hit.normal, seed);
+                origin = add(hit.position, multiply(hit.normal, settings.ray_epsilon * 4.0f));
+            }
         }
     }
 
