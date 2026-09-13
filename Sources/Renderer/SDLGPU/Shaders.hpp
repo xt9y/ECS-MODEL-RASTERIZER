@@ -255,6 +255,73 @@ float3 ApplyNormalMap(float3 n, float3 position, float2 uv, int slot, float scal
     return normalize(t * mapped.x + b * mapped.y + normalize(n) * mapped.z);
 }
 
+float3 DirectLighting(
+    float3 position,
+    float3 normal,
+    float3 view,
+    float3 albedo,
+    float roughness,
+    float metallic,
+    GpuMaterial material,
+    out float3 clearcoat_direct)
+{
+    float3 direct = 0.0.xxx;
+    clearcoat_direct = 0.0.xxx;
+    float spec_power = max(2.0 / max(roughness * roughness, 1.0e-3) - 2.0, 1.0);
+    float3 f0 = lerp(0.04.xxx * material.specular.x * material.specular.yzw, albedo, metallic);
+    float3 diffuse = albedo * (1.0 - metallic) / 3.14159265359;
+    float clearcoat = material.clearcoat_sheen.x;
+    float coat_roughness = max(material.clearcoat_sheen.y, 0.04);
+    float coat_power = max(2.0 / max(coat_roughness * coat_roughness, 1.0e-3) - 2.0, 1.0);
+    uint light_count = (uint)max(PGI[11].z, 0.0);
+    uint light_base = (uint)max(PGI[11].w, 12.0);
+
+    for (uint light_index = 0u; light_index < light_count; ++light_index) {
+        uint offset = light_base + light_index * 5u;
+        float4 position_intensity = PGI[offset + 0u];
+        float4 direction_type = PGI[offset + 1u];
+        float4 color_range = PGI[offset + 2u];
+        float4 cone_shadow = PGI[offset + 3u];
+        if (position_intensity.w <= 0.0) continue;
+
+        float3 light_direction = normalize(direction_type.xyz);
+        float3 l = -light_direction;
+        float attenuation = 1.0;
+        float max_t = 1.0e30;
+        if (direction_type.w < 1.5 || direction_type.w > 2.5) {
+            float3 to_light = position_intensity.xyz - position;
+            float dist = length(to_light);
+            if (dist <= 1.0e-5) continue;
+            l = to_light / dist;
+            float bias = max(cone_shadow.w, 1.0e-4);
+            max_t = max(dist - bias, 0.0);
+            attenuation = 1.0 / max(dist * dist, 1.0);
+            if (color_range.w > 0.0) attenuation *= saturate(1.0 - dist / color_range.w);
+            if (direction_type.w > 2.5)
+                attenuation *= smoothstep(cone_shadow.y, cone_shadow.x, dot(-l, light_direction));
+        }
+        if (attenuation <= 0.0) continue;
+
+        float ndotl = saturate(dot(normal, l));
+        if (ndotl <= 0.0) continue;
+        float shadow = 1.0;
+        if (cone_shadow.z > 0.5 && max_t > 0.0) {
+            float bias = max(cone_shadow.w, 1.0e-4);
+            if (Occluded(position + normal * bias, l, max_t)) shadow = 0.0;
+        }
+        if (shadow <= 0.0) continue;
+
+        float3 h = normalize(l + view);
+        float ndoth = saturate(dot(normal, h));
+        float spec_term = pow(ndoth, spec_power) * (spec_power + 2.0) / 8.0;
+        float energy = position_intensity.w * attenuation * shadow;
+        direct += (diffuse * ndotl + f0 * spec_term * ndotl) * color_range.rgb * energy;
+        float coat_term = clearcoat * 0.04 * pow(ndoth, coat_power) * ndotl;
+        clearcoat_direct += color_range.rgb * coat_term * energy;
+    }
+    return direct;
+}
+
 struct PSOut { float4 color : SV_Target0; float2 velocity : SV_Target1; };
 
 PSOut PSMain(VSOut i) {
@@ -283,50 +350,17 @@ PSOut PSMain(VSOut i) {
         return o;
     }
 
-    float3 light_position = PGI[8].xyz;
-    float light_intensity = PGI[8].w;
-    float3 light_direction = normalize(PGI[9].xyz);
-    float light_type = PGI[9].w;
-    float3 light_color = PGI[10].xyz;
-    float light_range = PGI[10].w;
-    float3 l = -light_direction;
-    float attenuation = 1.0;
-    float max_t = 1.0e30;
-    if (light_type < 1.5 || light_type > 2.5) {
-        float3 to_light = light_position - i.world;
-        float dist = length(to_light);
-        l = to_light / max(dist, 1.0e-5);
-        max_t = max(dist - 2.0e-3, 0.0);
-        attenuation = 1.0 / max(dist * dist, 1.0);
-        if (light_range > 0.0) attenuation *= saturate(1.0 - dist / light_range);
-        if (light_type > 2.5) {
-            float cone = dot(-l, light_direction);
-            attenuation *= smoothstep(PGI[11].y, PGI[11].x, cone);
-        }
-    }
-
-    float ndotl = saturate(dot(n, l));
-    float shadow = ndotl > 0.0 && max_t > 0.0 && Occluded(i.world + n*2.0e-3, l, max_t) ? 0.0 : 1.0;
-    float3 h = normalize(l + v);
-    float ndoth = saturate(dot(n, h));
-    float spec_power = max(2.0 / max(roughness * roughness, 1.0e-3) - 2.0, 1.0);
-    float spec_term = pow(ndoth, spec_power) * (spec_power + 2.0) / 8.0;
-    float3 f0 = lerp(0.04.xxx * material.specular.x * material.specular.yzw, albedo, metallic);
-    float3 diffuse = albedo * (1.0 - metallic) / 3.14159265359;
-    float3 direct = (diffuse * ndotl + f0 * spec_term * ndotl) * light_color * light_intensity * attenuation * shadow;
-
+    float3 clearcoat_direct;
+    float3 direct = DirectLighting(i.world, n, v, albedo, roughness, metallic, material, clearcoat_direct);
     float3 gi = SampleGI(i.world, n) * albedo * (1.0 - metallic);
     float3 ambient = PGI[6].xyz * PGI[6].w * albedo * ao;
     float3 sheen = material.sheen_thickness.rgb * pow(1.0 - saturate(dot(n,v)), 5.0) * (1.0 - material.clearcoat_sheen.z);
-    float clearcoat = material.clearcoat_sheen.x;
-    float coat_roughness = max(material.clearcoat_sheen.y, 0.04);
-    float coat_power = max(2.0 / max(coat_roughness*coat_roughness, 1.0e-3)-2.0, 1.0);
-    float coat = clearcoat * 0.04 * pow(ndoth, coat_power) * ndotl * light_intensity * attenuation * shadow;
+    float3 f0 = lerp(0.04.xxx * material.specular.x * material.specular.yzw, albedo, metallic);
     float iri = material.anisotropy_iridescence.z;
     float3 iridescent = iri * float3(0.5 + 0.5*sin(dot(v,n)*8.0), 0.5 + 0.5*sin(dot(v,n)*8.0+2.1), 0.5 + 0.5*sin(dot(v,n)*8.0+4.2));
     float transmission = saturate(material.clearcoat_sheen.w);
     float3 transmitted = EnvironmentColor(-v) * transmission * albedo;
-    float3 color = direct + gi + ambient + emissive + sheen + coat.xxx + iridescent * f0 + transmitted;
+    float3 color = direct + gi + ambient + emissive + sheen + clearcoat_direct + iridescent * f0 + transmitted;
 
     float distance_to_camera = length(i.world - PCameraPositionNear.xyz);
     float fog_factor = 0.0;
@@ -530,7 +564,35 @@ Surface MakeSurface(Hit hit,float3 rd){
 }
 
 float3 DirectLight(Surface s,float3 view){
-    float type=GI[9].w;float3 l=-normalize(GI[9].xyz);float attenuation=1,max_t=1e30;if(type<1.5||type>2.5){float3 d=GI[8].xyz-s.position;float dist=length(d);l=d/max(dist,1e-5);max_t=max(dist-.002,0.0);attenuation=1/max(dist*dist,1.0);if(GI[10].w>0)attenuation*=saturate(1-dist/GI[10].w);if(type>2.5)attenuation*=smoothstep(GI[11].y,GI[11].x,dot(-l,normalize(GI[9].xyz)));}float ndl=saturate(dot(s.normal,l));if(ndl<=0)return 0.0.xxx;if(Occluded(s.position+s.normal*.002,l,max_t))return 0.0.xxx;GpuMaterial m=Materials[min(s.material,(uint)max(Counts.z-1,0))];float3 h=normalize(l+view);float p=max(2/max(s.roughness*s.roughness,.001)-2,1);float spec=pow(saturate(dot(s.normal,h)),p)*(p+2)/8;float3 f0=lerp(.04.xxx*m.specular.x*m.specular.yzw,s.albedo,s.metallic);float3 diffuse=s.albedo*(1-s.metallic)/3.14159265359;return(diffuse*ndl+f0*spec*ndl)*GI[10].xyz*GI[8].w*attenuation;
+    GpuMaterial m=Materials[min(s.material,(uint)max(Counts.z-1,0))];
+    float p=max(2/max(s.roughness*s.roughness,.001)-2,1);
+    float3 f0=lerp(.04.xxx*m.specular.x*m.specular.yzw,s.albedo,s.metallic);
+    float3 diffuse=s.albedo*(1-s.metallic)/3.14159265359;
+    float3 result=0.0.xxx;
+    uint light_count=(uint)max(GI[11].z,0.0);
+    uint light_base=(uint)max(GI[11].w,12.0);
+    for(uint light_index=0u;light_index<light_count;++light_index){
+        uint offset=light_base+light_index*5u;
+        float4 position_intensity=GI[offset+0u];
+        float4 direction_type=GI[offset+1u];
+        float4 color_range=GI[offset+2u];
+        float4 cone_shadow=GI[offset+3u];
+        if(position_intensity.w<=0.0)continue;
+        float3 light_direction=normalize(direction_type.xyz);
+        float3 l=-light_direction;
+        float attenuation=1.0,max_t=1e30;
+        if(direction_type.w<1.5||direction_type.w>2.5){
+            float3 d=position_intensity.xyz-s.position;float dist=length(d);if(dist<=1e-5)continue;
+            l=d/dist;float bias=max(cone_shadow.w,1e-4);max_t=max(dist-bias,0.0);attenuation=1/max(dist*dist,1.0);
+            if(color_range.w>0)attenuation*=saturate(1-dist/color_range.w);
+            if(direction_type.w>2.5)attenuation*=smoothstep(cone_shadow.y,cone_shadow.x,dot(-l,light_direction));
+        }
+        float ndl=saturate(dot(s.normal,l));if(ndl<=0||attenuation<=0)continue;
+        if(cone_shadow.z>0.5&&max_t>0){float bias=max(cone_shadow.w,1e-4);if(Occluded(s.position+s.normal*bias,l,max_t))continue;}
+        float3 h=normalize(l+view);float spec=pow(saturate(dot(s.normal,h)),p)*(p+2)/8;
+        result+=(diffuse*ndl+f0*spec*ndl)*color_range.xyz*position_intensity.w*attenuation;
+    }
+    return result;
 }
 
 float3 ShadeRay(float3 origin,float3 direction,out float depth){
