@@ -9,12 +9,6 @@ namespace Renderer {
 struct RasterizerSettings {
     bool enabled = false;
     bool viewport_culling = false;
-    int shadow_resolution = 0;
-    int fallback_shadow_resolution = 0;
-    int minimum_shadow_resolution = 0;
-    float shadow_near_plane = 0.0f;
-    float shadow_far_scale = 0.0f;
-    float directional_shadow_distance = 80.0f;
     Vec4 clear_color{};
 };
 
@@ -37,21 +31,9 @@ public:
     void setEnabled(bool enabled) override;
 
     void setViewportCulling(bool value);
-    void setShadowResolution(int value);
-    void setFallbackShadowResolution(int value);
-    void setMinimumShadowResolution(int value);
-    void setShadowNearPlane(float value);
-    void setShadowFarScale(float value);
-    void setDirectionalShadowDistance(float value);
     void setClearColor(Vec4 value);
 
     bool viewportCulling() const;
-    int shadowResolution() const;
-    int fallbackShadowResolution() const;
-    int minimumShadowResolution() const;
-    float shadowNearPlane() const;
-    float shadowFarScale() const;
-    float directionalShadowDistance() const;
     Vec4 clearColor() const;
 
     RasterizerSettings& settings();
