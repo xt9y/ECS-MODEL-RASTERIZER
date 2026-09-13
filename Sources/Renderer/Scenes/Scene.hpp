@@ -74,7 +74,6 @@ struct RenderRevision {
 };
 
 CameraState cameraState(const Ecs::World& world);
-LightState lightState(const Ecs::World& world);
 void collectLights(const Ecs::World& world, std::vector<LightState>& out);
 RenderRevision renderRevision(const Ecs::World& world);
 void collectRenderItems(const Ecs::World& world, std::vector<RenderItem>& out);
