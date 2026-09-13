@@ -389,6 +389,9 @@ struct Runtime::Impl {
     std::deque<Event> emitted_events;
     std::uint64_t next_runtime_id = 1u;
     std::uint64_t activations_this_update = 0u;
+    std::uint64_t activation_serial = 0u;
+    std::vector<std::uint64_t> random_serials;
+    std::vector<Value> random_values;
     double time_since_start = 0.0;
     double previous_tick_time = 0.0;
     bool first_tick = true;
@@ -654,8 +657,13 @@ struct Runtime::Impl {
             return input("default", {});
         }
         if (op == "math/random") {
-            std::uniform_real_distribution<double> distribution(0.0, 1.0);
-            return scalar(distribution(random));
+            if (node_index >= random_serials.size() || node_index >= random_values.size()) return scalar(0.0);
+            if (random_serials[node_index] != activation_serial) {
+                std::uniform_real_distribution<double> distribution(0.0, 1.0);
+                random_values[node_index] = scalar(distribution(random));
+                random_serials[node_index] = activation_serial;
+            }
+            return random_values[node_index];
         }
         if (op == "math/rad") return unary(a, [](double x) { return x * std::numbers::pi / 180.0; });
         if (op == "math/deg") return unary(a, [](double x) { return x * 180.0 / std::numbers::pi; });
@@ -882,6 +890,7 @@ struct Runtime::Impl {
     {
         if(node_index>=nodes.size())return fail(error,"KHR_interactivity flow targets invalid node");
         if(++activations_this_update>limits.max_activations_per_update)return fail(error,"KHR_interactivity activation budget exceeded");
+        ++activation_serial;
         ++statistics.activations;
         const std::string op=operation(node_index);
         const std::string extension=declarationExtension(node_index);
@@ -929,15 +938,14 @@ struct Runtime::Impl {
             return emit(world,node_index,"out",error);
         }
         if(op=="flow/for"){
-            const int start=integer(value("startIndex",integerValue(0)));
+            Value& index_state=transient_outputs[node_index]["__forIndex"];
+            if(input_socket!="__forContinue")index_state=integerValue(integer(value("startIndex",integerValue(0))));
+            const int index=integer(index_state);
             const int end=integer(value("endIndex",integerValue(0)));
-            transient_outputs[node_index]["__forIndex"]=integerValue(start);
-            for(int index=start;index<end;++index){
-                transient_outputs[node_index]["__forIndex"]=integerValue(index);
-                if(!emit(world,node_index,"loopBody",error)&&!emit(world,node_index,"body",error))return false;
-            }
-            transient_outputs[node_index]["__forIndex"]=integerValue(end);
-            return emit(world,node_index,"completed",error);
+            if(index>=end)return emit(world,node_index,"completed",error);
+            if(!emit(world,node_index,"loopBody",error))return false;
+            index_state=integerValue(index+1);
+            return activate(world,node_index,"__forContinue",error);
         }
         if(op=="flow/while"){
             std::size_t guard=0u;while(truthy(value("condition",{}))){if(++guard>limits.max_activations_per_update)return fail(error,"KHR_interactivity while loop budget exceeded");if(!emit(world,node_index,"loopBody",error)&&!emit(world,node_index,"body",error))return false;}return emit(world,node_index,"completed",error);
@@ -961,8 +969,11 @@ struct Runtime::Impl {
             auto reset=[&](){last=integerValue(-1);for(std::size_t i=0u;i<outputs.size();++i)transient_outputs[node_index]["__multiUsed"+std::to_string(i)]=boolean(false);};
             if(input_socket=="reset"){reset();return true;}
             if(outputs.empty())return true;
-            const bool is_loop=configBool(node_index,"isLoop",false);
-            const bool is_random=configBool(node_index,"isRandom",false);
+            const Json::Value* loop_config=configuration(node_index,"isLoop");
+            const Json::Value* random_config=configuration(node_index,"isRandom");
+            const bool valid_config=loop_config&&random_config&&loop_config->is(Json::Type::Boolean)&&random_config->is(Json::Type::Boolean);
+            const bool is_loop=valid_config?loop_config->boolean:false;
+            const bool is_random=valid_config?random_config->boolean:false;
             std::vector<std::size_t> available;
             available.reserve(outputs.size());
             for(std::size_t i=0u;i<outputs.size();++i){const auto found=transient_outputs[node_index].find("__multiUsed"+std::to_string(i));if(found==transient_outputs[node_index].end()||!truthy(found->second))available.push_back(i);}
@@ -1032,7 +1043,10 @@ struct Runtime::Impl {
         nodes.clear();nodes.reserve(node_array->array.size());for(std::size_t i=0u;i<node_array->array.size();++i){const Json::Value&n= node_array->array[i];if(!n.is(Json::Type::Object))return fail(error,"KHR_interactivity node is invalid");const int declaration=Json::integer(n.get("declaration"),-1);if(declaration<0||static_cast<std::size_t>(declaration)>=declarations.size())return fail(error,"KHR_interactivity node declaration is invalid");if(const Json::Value*values=n.get("values");values&&values->is(Json::Type::Object))for(const auto&[_,v]:values->object){if(!v.is(Json::Type::Object))return fail(error,"KHR_interactivity value socket is invalid");const int source=Json::integer(v.get("node"),-1);if(source>=0&&static_cast<std::size_t>(source)>=i)return fail(error,"KHR_interactivity value edge references current/later node");}nodes.push_back(&n);}
         variables.clear();variable_names.clear();if(const Json::Value*array=graph->get("variables");array&&array->is(Json::Type::Array))for(std::size_t i=0u;i<array->array.size();++i){const Json::Value&v=array->array[i];if(!v.is(Json::Type::Object))return fail(error,"KHR_interactivity variable is invalid");const int type=Json::integer(v.get("type"),-1);if(type<0||static_cast<std::size_t>(type)>=types.size())return fail(error,"KHR_interactivity variable type is invalid");VariableState state;state.name=Json::stringValue(v.get("name"));state.value=fromJson(typeName(type),v.get("value"));if(!state.name.empty())variable_names[state.name]=variables.size();variables.push_back(std::move(state));}
         events.clear();event_ids.clear();if(const Json::Value*array=graph->get("events");array&&array->is(Json::Type::Array))for(const Json::Value&e:array->array){if(!e.is(Json::Type::Object))return fail(error,"KHR_interactivity event is invalid");EventDefinition event;event.id=Json::stringValue(e.get("id"));if(const Json::Value*values=e.get("values");values&&values->is(Json::Type::Object))for(const auto&[socket_name,type_value]:values->object){const int type=Json::integer(&type_value,-1);if(type<0||static_cast<std::size_t>(type)>=types.size())return fail(error,"KHR_interactivity event value type is invalid");event.values[socket_name]=static_cast<std::size_t>(type);}if(!event.id.empty())event_ids[event.id]=events.size();events.push_back(std::move(event));}
-        transient_outputs.assign(nodes.size(),{});return true;
+        transient_outputs.assign(nodes.size(),{});
+        random_serials.assign(nodes.size(),std::numeric_limits<std::uint64_t>::max());
+        random_values.assign(nodes.size(),{});
+        return true;
     }
 };
 
