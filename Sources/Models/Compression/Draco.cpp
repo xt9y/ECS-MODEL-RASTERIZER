@@ -235,8 +235,10 @@ bool sequentialConnectivity(Reader& r, DracoMesh *mesh, std::string *error)
     std::uint8_t method=0;
     if (!r.var32(&faces) || !r.var32(&points) || !r.u8(&method))
         return fail(error,"truncated Draco sequential connectivity header");
-    if (faces > std::numeric_limits<std::size_t>::max()/3u)
-        return fail(error,"Draco face count overflows");
+    if constexpr (sizeof(std::size_t) <= sizeof(std::uint32_t)) {
+        if (faces > std::numeric_limits<std::size_t>::max()/3u)
+            return fail(error,"Draco face count overflows");
+    }
     mesh->point_count=points;
     mesh->indices.resize(static_cast<std::size_t>(faces)*3u);
     if (method==0u) {

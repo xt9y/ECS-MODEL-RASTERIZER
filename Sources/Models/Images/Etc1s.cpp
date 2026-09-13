@@ -624,7 +624,7 @@ struct ImageDesc {
     std::uint32_t alpha_length = 0u;
 };
 
-bool checkedSection(
+[[maybe_unused]] bool checkedSection(
     std::size_t offset,
     std::size_t length,
     std::size_t size,
