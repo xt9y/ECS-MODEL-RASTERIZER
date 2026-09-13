@@ -5,6 +5,7 @@
 #include "Renderer/GaussianSplat/GaussianSplat.hpp"
 #include "Renderer/GlobalIllumination/GlobalIllumination.hpp"
 #include "Renderer/ShadingState.hpp"
+#include "Renderer/Volumetrics/Volumetrics.hpp"
 #include "UI/RenderPass.hpp"
 
 namespace Renderer {
@@ -16,6 +17,7 @@ void IRenderer::render(const Ecs::World& world)
     output.global_illumination = GlobalIllumination::update(world);
     if (!renderScene(world, output)) return;
     if (!GaussianSplat::render(world, output)) return;
+    if (!Volumetrics::render(world, output)) return;
     if (post_process_ && !post_process_->process(output)) return;
     if (!compose(output)) return;
     Debug::RenderPass::render(world, output);
