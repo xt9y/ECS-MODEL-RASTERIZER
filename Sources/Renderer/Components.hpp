@@ -77,6 +77,16 @@ struct LightComponent {
     float outer_cone_degrees = 30.0f;
 };
 
+struct ShadowComponent {
+    bool enabled = true;
+    float bias = 0.002f;
+};
+
+struct VolumetricLightComponent {
+    bool enabled = true;
+    float intensity = 1.0f;
+};
+
 struct GlobalIlluminationComponent {
     bool enabled = false;
     float intensity = 0.0f;
