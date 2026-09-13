@@ -7,6 +7,10 @@
 #include <cstdint>
 #include <memory>
 
+namespace Renderer::Lighting {
+struct State;
+}
+
 namespace Renderer::GlobalIllumination::PhotonMapping {
 
 struct Settings {
@@ -36,7 +40,7 @@ public:
 
     void rebuild(
         const TraceScene& scene,
-        const Scenes::LightState& light,
+        const Lighting::State& lighting,
         const Settings& settings
     );
     Vec3 sample(Vec3 position, Vec3 normal) const;
