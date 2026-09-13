@@ -65,7 +65,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr/local \
             -DSPIRV_CROSS_SHARED=ON \
-            -DSPIRV_CROSS_STATIC=OFF
+            -DSPIRV_CROSS_STATIC=OFF \
+            -DSPIRV_CROSS_CLI=OFF
           cmake --build /tmp/SPIRV-Cross-build --parallel 2
           sudo cmake --install /tmp/SPIRV-Cross-build
 
