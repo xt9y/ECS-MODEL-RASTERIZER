@@ -10,5 +10,6 @@
 #include "Renderer/PathTracer/PathTracer.hpp"
 #include "Renderer/Rasterizer/Rasterizer.hpp"
 #include "Renderer/RayTracer/RayTracer.hpp"
+#include "Renderer/Volumetrics/Volumetrics.hpp"
 
 #endif
