@@ -3,13 +3,13 @@
 
 #include "Ecs/Ecs.hpp"
 #include "Renderer/Environment.hpp"
-#include "Renderer/Scenes/SceneCache.hpp"
+#include "Renderer/Lighting/Lighting.hpp"
 
 namespace Renderer::Internal {
 
 struct ShadingState {
     EnvironmentState environment{};
-    Renderer::Scenes::LightState light{};
+    Lighting::State lighting{};
 };
 
 void updateShadingState(const Ecs::World& world);
