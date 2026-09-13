@@ -268,6 +268,7 @@ bool RayTracer::renderScene(const Ecs::World& world, Internal::FrameOutput& outp
         return false;
     }
     if (!impl_->frame.begin(output)) return false;
+    output.scene_resources = &impl_->scene;
 
     const Scenes::CameraState camera = Scenes::cameraState(Scenes::Scene::cameraState(world));
     if (!impl_->active() || !camera.valid || impl_->scene.triangleCount() == 0u) {
