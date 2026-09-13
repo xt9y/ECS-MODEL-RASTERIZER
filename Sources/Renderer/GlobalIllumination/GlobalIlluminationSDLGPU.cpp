@@ -20,7 +20,7 @@ SDL_GPUBuffer *buffer = nullptr;
 std::size_t capacity = 0u;
 std::uint64_t uploaded_revision = std::numeric_limits<std::uint64_t>::max();
 std::uint64_t uploaded_environment = std::numeric_limits<std::uint64_t>::max();
-std::uint64_t uploaded_light = std::numeric_limits<std::uint64_t>::max();
+std::uint64_t uploaded_lighting = std::numeric_limits<std::uint64_t>::max();
 bool uploaded_valid = false;
 
 bool upload(const GlobalIllumination::Field *field)
@@ -30,9 +30,9 @@ bool upload(const GlobalIllumination::Field *field)
     const std::uint64_t revision = valid ? field->revision : 0u;
     const ShadingState& shading = shadingState();
     const std::uint64_t environment_revision = environmentSignature(shading.environment);
-    const std::uint64_t light_revision = Renderer::Scenes::lightSignature(shading.light);
+    const std::uint64_t lighting_revision = shading.lighting.revision;
     if (buffer && revision == uploaded_revision && environment_revision == uploaded_environment &&
-        light_revision == uploaded_light && valid == uploaded_valid)
+        lighting_revision == uploaded_lighting && valid == uploaded_valid)
         return true;
 
     const std::size_t probe_count = valid ? field->probes.size() : 0u;
@@ -56,14 +56,14 @@ bool upload(const GlobalIllumination::Field *field)
         data[30] = std::max(environment.fog_end, environment.fog_start + 1.0e-4f); data[31] = environment.rotation_degrees * (Pi / 180.0f);
     }
 
-    const Renderer::Scenes::LightState& light = shading.light;
-    if (light.valid) {
-        const float inner = std::cos(light.inner_cone_degrees * (Pi / 180.0f));
-        const float outer = std::cos(light.outer_cone_degrees * (Pi / 180.0f));
-        data[32] = light.position.x; data[33] = light.position.y; data[34] = light.position.z; data[35] = std::max(light.intensity, 0.0f);
-        data[36] = light.direction.x; data[37] = light.direction.y; data[38] = light.direction.z;
-        data[39] = light.type == LightType::Point ? 1.0f : (light.type == LightType::Directional ? 2.0f : 3.0f);
-        data[40] = light.color.x; data[41] = light.color.y; data[42] = light.color.z; data[43] = std::max(light.range, 0.0f);
+    const Renderer::Scenes::LightState *light = Lighting::primary(shading.lighting);
+    if (light && light->valid) {
+        const float inner = std::cos(light->inner_cone_degrees * (Pi / 180.0f));
+        const float outer = std::cos(light->outer_cone_degrees * (Pi / 180.0f));
+        data[32] = light->position.x; data[33] = light->position.y; data[34] = light->position.z; data[35] = std::max(light->intensity, 0.0f);
+        data[36] = light->direction.x; data[37] = light->direction.y; data[38] = light->direction.z;
+        data[39] = light->type == LightType::Point ? 1.0f : (light->type == LightType::Directional ? 2.0f : 3.0f);
+        data[40] = light->color.x; data[41] = light->color.y; data[42] = light->color.z; data[43] = std::max(light->range, 0.0f);
         data[44] = inner; data[45] = outer;
     }
 
@@ -102,7 +102,7 @@ bool upload(const GlobalIllumination::Field *field)
 
     uploaded_revision = revision;
     uploaded_environment = environment_revision;
-    uploaded_light = light_revision;
+    uploaded_lighting = lighting_revision;
     uploaded_valid = valid;
     return true;
 }
@@ -139,7 +139,7 @@ void shutdownGlobalIlluminationSDLGPU()
     capacity = 0u;
     uploaded_revision = std::numeric_limits<std::uint64_t>::max();
     uploaded_environment = std::numeric_limits<std::uint64_t>::max();
-    uploaded_light = std::numeric_limits<std::uint64_t>::max();
+    uploaded_lighting = std::numeric_limits<std::uint64_t>::max();
     uploaded_valid = false;
 }
 
