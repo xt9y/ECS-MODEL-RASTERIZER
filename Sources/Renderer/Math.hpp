@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_RENDERER_MATH_HPP
-#define RW_ENGINE_RENDERER_MATH_HPP
+#ifndef HORSE_RENDERER_MATH_HPP
+#define HORSE_RENDERER_MATH_HPP
 
 #include "Renderer/Components.hpp"
 

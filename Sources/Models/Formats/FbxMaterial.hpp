@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_FORMATS_FBX_MATERIAL_HPP
-#define RW_ENGINE_MODELS_FORMATS_FBX_MATERIAL_HPP
+#ifndef HORSE_MODELS_FORMATS_FBX_MATERIAL_HPP
+#define HORSE_MODELS_FORMATS_FBX_MATERIAL_HPP
 
 #include "Models/Formats/FbxScene.hpp"
 #include "Models/Core/Material.hpp"

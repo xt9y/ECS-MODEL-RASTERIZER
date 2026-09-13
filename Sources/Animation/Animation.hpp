@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_ANIMATION_HPP
-#define RW_ENGINE_ANIMATION_HPP
+#ifndef HORSE_ANIMATION_HPP
+#define HORSE_ANIMATION_HPP
 
 #include "Ecs/Ecs.hpp"
 

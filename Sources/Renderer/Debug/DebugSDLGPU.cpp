@@ -1,4 +1,4 @@
-#include "Renderer/Debug/Internal.hpp"
+#include "Renderer/Debug/RenderPass.hpp"
 
 #include "Renderer/SDLGPU/Context.hpp"
 
@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <limits>
 
-namespace Renderer::Debug::Internal {
+namespace Renderer::Debug::RenderPass {
 namespace {
 
 inline constexpr const char *Shader = R"HLSL(
@@ -165,4 +165,4 @@ void shutdownSDLGPU()
     state = {};
 }
 
-} // namespace Renderer::Debug::Internal
+} // namespace Renderer::Debug::RenderPass

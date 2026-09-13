@@ -1,6 +1,6 @@
 #include "Renderer/Fonts/FontPass.hpp"
 
-#include "Font.hpp"
+#include "Font/Font.hpp"
 #include "Models/Images/Image.hpp"
 #include "Renderer/Fonts/FontAtlas.hpp"
 #include "Renderer/SDLGPU/Context.hpp"

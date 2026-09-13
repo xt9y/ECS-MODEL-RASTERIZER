@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_RENDERER_RASTERIZER_HPP
-#define RW_ENGINE_RENDERER_RASTERIZER_HPP
+#ifndef HORSE_RENDERER_RASTERIZER_HPP
+#define HORSE_RENDERER_RASTERIZER_HPP
 
 #include "Renderer/Components.hpp"
 #include "Renderer/Renderer.hpp"

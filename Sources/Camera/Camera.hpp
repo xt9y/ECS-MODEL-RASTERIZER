@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_CAMERA_HPP
-#define RW_ENGINE_CAMERA_HPP
+#ifndef HORSE_CAMERA_HPP
+#define HORSE_CAMERA_HPP
 
 #include "Camera/FreeController.hpp"
 #include "Ecs/Ecs.hpp"

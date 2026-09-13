@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_FORMATS_FBX_GEOMETRY_HPP
-#define RW_ENGINE_MODELS_FORMATS_FBX_GEOMETRY_HPP
+#ifndef HORSE_MODELS_FORMATS_FBX_GEOMETRY_HPP
+#define HORSE_MODELS_FORMATS_FBX_GEOMETRY_HPP
 
 #include "Models/Formats/FbxTransform.hpp"
 #include "Models/Models.hpp"

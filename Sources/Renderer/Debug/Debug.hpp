@@ -9,7 +9,7 @@
 
 namespace Renderer::Debug {
 
-namespace Internal {
+namespace RenderPass {
 void render(const Ecs::World& world, Renderer::Internal::FrameOutput& output);
 }
 
@@ -70,7 +70,7 @@ private:
     struct Impl;
     Impl *impl_ = nullptr;
 
-    friend void Internal::render(
+    friend void RenderPass::render(
         const Ecs::World& world,
         Renderer::Internal::FrameOutput& output
     );

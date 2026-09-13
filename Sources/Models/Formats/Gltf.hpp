@@ -7,9 +7,7 @@
 
 namespace Models::Formats::Gltf {
 
-namespace Formats = ::Models::Formats;
-
-bool load(const std::string& path, Formats::Document *output, std::string *error = nullptr);
+bool load(const std::string& path, Document *output, std::string *error = nullptr);
 
 } // namespace Models::Formats::Gltf
 

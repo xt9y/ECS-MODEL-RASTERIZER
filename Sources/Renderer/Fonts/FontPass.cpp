@@ -1,7 +1,7 @@
 #include "Renderer/Fonts/FontPass.hpp"
 
-#include "Camera.hpp"
-#include "Font.hpp"
+#include "Camera/Camera.hpp"
+#include "Font/Font.hpp"
 #include "Renderer/Fonts/FontLayout.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/Scenes/Scene.hpp"

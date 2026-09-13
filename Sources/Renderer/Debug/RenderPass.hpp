@@ -1,5 +1,5 @@
-#ifndef HORSE_RENDERER_DEBUG_INTERNAL_HPP
-#define HORSE_RENDERER_DEBUG_INTERNAL_HPP
+#ifndef HORSE_RENDERER_DEBUG_RENDER_PASS_HPP
+#define HORSE_RENDERER_DEBUG_RENDER_PASS_HPP
 
 #include "Renderer/Math.hpp"
 #include "Renderer/Renderer.hpp"
@@ -7,7 +7,7 @@
 #include <array>
 #include <vector>
 
-namespace Renderer::Debug::Internal {
+namespace Renderer::Debug::RenderPass {
 
 struct Vertex {
     std::array<float, 4> position{};
@@ -24,6 +24,6 @@ void renderSDLGPU(
 );
 void shutdownSDLGPU();
 
-} // namespace Renderer::Debug::Internal
+} // namespace Renderer::Debug::RenderPass
 
 #endif

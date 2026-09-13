@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_RENDERER_GLOBAL_ILLUMINATION_DEBUG_HPP
-#define RW_ENGINE_RENDERER_GLOBAL_ILLUMINATION_DEBUG_HPP
+#ifndef HORSE_RENDERER_GLOBAL_ILLUMINATION_DEBUG_HPP
+#define HORSE_RENDERER_GLOBAL_ILLUMINATION_DEBUG_HPP
 
 #include "Renderer/GlobalIllumination/GlobalIllumination.hpp"
 #include "Renderer/GlobalIllumination/PhotonMapping/PhotonMap.hpp"

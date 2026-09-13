@@ -1,7 +1,7 @@
 #include "Camera/FreeController.hpp"
 
-#include "Camera.hpp"
-#include "Input.hpp"
+#include "Camera/Camera.hpp"
+#include "Input/Input.hpp"
 #include "Renderer/Components.hpp"
 
 #include <algorithm>

@@ -1,6 +1,6 @@
-#include "Window.hpp"
+#include "Window/Window.hpp"
 
-#include "Window/Internal.hpp"
+#include "Window/Backend.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -127,7 +127,7 @@ void *native()
     return state().window;
 }
 
-namespace Internal {
+namespace Backend {
 
 SDL_Window *window()
 {
@@ -139,5 +139,5 @@ const std::vector<SDL_Event>& events()
     return state().events;
 }
 
-} // namespace Internal
+} // namespace Backend
 } // namespace Window

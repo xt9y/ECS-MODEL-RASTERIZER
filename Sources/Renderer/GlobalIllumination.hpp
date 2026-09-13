@@ -1,4 +1,0 @@
-#ifndef RW_ENGINE_RENDERER_GLOBAL_ILLUMINATION_COMPAT_HPP
-#define RW_ENGINE_RENDERER_GLOBAL_ILLUMINATION_COMPAT_HPP
-#include "Renderer/GlobalIllumination/GlobalIllumination.hpp"
-#endif

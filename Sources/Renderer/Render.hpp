@@ -1,7 +1,7 @@
-#ifndef RW_ENGINE_RENDER_HPP
-#define RW_ENGINE_RENDER_HPP
+#ifndef HORSE_RENDER_HPP
+#define HORSE_RENDER_HPP
 
-#include "Font.hpp"
+#include "Font/Font.hpp"
 #include "Renderer/Components.hpp"
 #include "Renderer/Environment.hpp"
 #include "Renderer/PostProcess.hpp"

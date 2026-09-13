@@ -8,7 +8,7 @@
 #include "Renderer/SDLGPU/Uniforms.hpp"
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneResourcesSDLGPU.hpp"
-#include "Window.hpp"
+#include "Window/Window.hpp"
 
 #include <SDL3/SDL.h>
 

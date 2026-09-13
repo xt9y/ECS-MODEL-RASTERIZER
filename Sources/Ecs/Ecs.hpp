@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_ECS_HPP
-#define RW_ENGINE_ECS_HPP
+#ifndef HORSE_ECS_HPP
+#define HORSE_ECS_HPP
 
 #include <array>
 #include <cstddef>

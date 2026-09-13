@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_IMAGES_IMAGE_HPP
-#define RW_ENGINE_MODELS_IMAGES_IMAGE_HPP
+#ifndef HORSE_MODELS_IMAGES_IMAGE_HPP
+#define HORSE_MODELS_IMAGES_IMAGE_HPP
 
 #include <cstddef>
 #include <cstdint>

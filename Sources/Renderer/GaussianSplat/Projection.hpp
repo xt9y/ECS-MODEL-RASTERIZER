@@ -3,7 +3,7 @@
 
 #include "Models/GaussianSplat.hpp"
 #include "Renderer/Math.hpp"
-#include "Renderer/Systems/SceneCache.hpp"
+#include "Renderer/Scenes/SceneCache.hpp"
 
 #include <cstdint>
 
@@ -27,7 +27,7 @@ bool project(
     const Models::GaussianSplat::Splat& splat,
     std::uint32_t spherical_harmonic_degree,
     const Math::Mat4& model,
-    const Systems::CameraState& camera,
+    const Scenes::CameraState& camera,
     int width,
     int height,
     ProjectedSplat *output

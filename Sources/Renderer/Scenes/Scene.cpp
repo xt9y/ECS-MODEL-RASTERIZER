@@ -1,6 +1,6 @@
 #include "Renderer/Scenes/Scene.hpp"
 
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 #include "Models/Core/Texture.hpp"
 #include "Models/GaussianSplat.hpp"
 #include "Renderer/Hierarchy.hpp"

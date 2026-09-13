@@ -1,4 +1,4 @@
-#include "Renderer/FontAtlas.hpp"
+#include "Renderer/Fonts/FontAtlas.hpp"
 
 #include <array>
 #include <cstddef>

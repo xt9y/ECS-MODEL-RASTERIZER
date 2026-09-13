@@ -1,7 +1,7 @@
 #include "Renderer/Scenes/SceneCache.hpp"
 
 #include "Animation/Animation.hpp"
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 #include "Models/Core/Texture.hpp"
 #include "Renderer/Environment.hpp"
 #include "Renderer/Math.hpp"

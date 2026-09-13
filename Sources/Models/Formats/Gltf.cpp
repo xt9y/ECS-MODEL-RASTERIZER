@@ -1244,7 +1244,7 @@ bool buildScene(Context& context, Document *output, std::string *error)
 
 } // namespace
 
-bool load(const std::string& path, Formats::Document *output, std::string *error)
+bool load(const std::string& path, Document *output, std::string *error)
 {
     if (error) error->clear();
     if (!output) return fail(error,"null glTF output");

@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_HPP
-#define RW_ENGINE_MODELS_HPP
+#ifndef HORSE_MODELS_HPP
+#define HORSE_MODELS_HPP
 
 #include "Animation/Animation.hpp"
 #include "Models/Core/Material.hpp"

@@ -1,6 +1,6 @@
 #include "Renderer/GaussianSplat/Projection.hpp"
 
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -61,7 +61,7 @@ Vec3 localAxis(const Models::GaussianSplat::Splat& splat, int axis)
 bool projectedAxis(
     Vec3 world_axis,
     Vec3 relative,
-    const Systems::CameraState& camera,
+    const Scenes::CameraState& camera,
     float depth,
     float tangent,
     float aspect,
@@ -113,7 +113,7 @@ bool project(
     const Models::GaussianSplat::Splat& splat,
     std::uint32_t spherical_harmonic_degree,
     const Math::Mat4& model,
-    const Systems::CameraState& camera,
+    const Scenes::CameraState& camera,
     int width,
     int height,
     ProjectedSplat *output)

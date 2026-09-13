@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_FONT_HPP
-#define RW_ENGINE_FONT_HPP
+#ifndef HORSE_FONT_HPP
+#define HORSE_FONT_HPP
 
 #include "Ecs/Ecs.hpp"
 #include "Renderer/Components.hpp"

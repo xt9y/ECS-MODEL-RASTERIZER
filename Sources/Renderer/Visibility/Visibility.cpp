@@ -1,6 +1,6 @@
 #include "Renderer/Visibility/Visibility.hpp"
 
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/Scenes/SceneCache.hpp"
 

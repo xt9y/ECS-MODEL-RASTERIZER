@@ -1,9 +1,9 @@
 #include "UI/UI.hpp"
 
-#include "Input.hpp"
+#include "Input/Input.hpp"
 #include "Renderer/SDLGPU/Context.hpp"
-#include "UI/Internal.hpp"
-#include "Window/Internal.hpp"
+#include "UI/RenderPass.hpp"
+#include "Window/Backend.hpp"
 
 #include <SDL3/SDL.h>
 #include <backends/imgui_impl_sdl3.h>
@@ -23,7 +23,7 @@ bool init()
 {
     if (ready) return true;
 
-    SDL_Window *window = Window::Internal::window();
+    SDL_Window *window = Window::Backend::window();
     if (!window || !Renderer::SDLGPU::retain()) return false;
 
     IMGUI_CHECKVERSION();
@@ -77,7 +77,7 @@ bool beginFrame()
 
     if (frame_active) ImGui::EndFrame();
 
-    for (const SDL_Event& event : Window::Internal::events())
+    for (const SDL_Event& event : Window::Backend::events())
         ImGui_ImplSDL3_ProcessEvent(&event);
 
     ImGui_ImplSDLGPU3_NewFrame();
@@ -103,7 +103,7 @@ bool wantsKeyboard()
     return ready && frame_visible && ImGui::GetIO().WantCaptureKeyboard;
 }
 
-namespace Internal {
+namespace RenderPass {
 
 void render(Renderer::Internal::FrameOutput& output)
 {
@@ -134,5 +134,5 @@ void render(Renderer::Internal::FrameOutput& output)
     SDL_EndGPURenderPass(pass);
 }
 
-} // namespace Internal
+} // namespace RenderPass
 } // namespace UI

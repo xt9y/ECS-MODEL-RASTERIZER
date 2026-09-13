@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_CORE_MATERIAL_HPP
-#define RW_ENGINE_MODELS_CORE_MATERIAL_HPP
+#ifndef HORSE_MODELS_CORE_MATERIAL_HPP
+#define HORSE_MODELS_CORE_MATERIAL_HPP
 
 #include "Models/Core/Texture.hpp"
 #include "Models/Core/Types.hpp"

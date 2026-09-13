@@ -1,7 +1,7 @@
 #include "Renderer/Debug/Debug.hpp"
 
-#include "Camera.hpp"
-#include "Renderer/Debug/Internal.hpp"
+#include "Camera/Camera.hpp"
+#include "Renderer/Debug/RenderPass.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneCache.hpp"
@@ -87,7 +87,7 @@ struct Inspector::Impl {
     const Scenes::SceneCache *bvh_cache = nullptr;
     std::vector<std::vector<std::uint32_t>> bvh_levels;
     BvhInfo bvh_info{};
-    std::vector<Internal::Vertex> lines;
+    std::vector<RenderPass::Vertex> lines;
 
     void invalidateBvhMetadata()
     {
@@ -125,7 +125,7 @@ struct Inspector::Impl {
         }
     }
 
-    Internal::Vertex vertex(Vec3 position, Vec4 color) const
+    RenderPass::Vertex vertex(Vec3 position, Vec4 color) const
     {
         return {
             {position.x, position.y, position.z, 1.0f},
@@ -437,11 +437,11 @@ void clear()
 
 void shutdown()
 {
-    Internal::shutdownSDLGPU();
+    RenderPass::shutdownSDLGPU();
     inspector().clear();
 }
 
-namespace Internal {
+namespace RenderPass {
 
 void render(const Ecs::World& world, Renderer::Internal::FrameOutput& output)
 {
@@ -495,5 +495,5 @@ void render(const Ecs::World& world, Renderer::Internal::FrameOutput& output)
     renderSDLGPU(state.lines, projection, view, output);
 }
 
-} // namespace Internal
+} // namespace RenderPass
 } // namespace Renderer::Debug

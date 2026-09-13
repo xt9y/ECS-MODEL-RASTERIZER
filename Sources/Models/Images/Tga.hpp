@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_IMAGES_TGA_HPP
-#define RW_ENGINE_MODELS_IMAGES_TGA_HPP
+#ifndef HORSE_MODELS_IMAGES_TGA_HPP
+#define HORSE_MODELS_IMAGES_TGA_HPP
 
 #include "Models/Images/Image.hpp"
 

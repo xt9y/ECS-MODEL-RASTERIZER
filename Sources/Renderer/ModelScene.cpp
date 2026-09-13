@@ -1,6 +1,6 @@
 #include "Renderer/ModelScene.hpp"
 
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 #include "Renderer/Components.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/ModelScenePointers.hpp"

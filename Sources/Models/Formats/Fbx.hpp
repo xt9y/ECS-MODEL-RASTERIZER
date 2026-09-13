@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_MODELS_FORMATS_FBX_HPP
-#define RW_ENGINE_MODELS_FORMATS_FBX_HPP
+#ifndef HORSE_MODELS_FORMATS_FBX_HPP
+#define HORSE_MODELS_FORMATS_FBX_HPP
 
 #include "Animation/Animation.hpp"
 #include "Models/Models.hpp"

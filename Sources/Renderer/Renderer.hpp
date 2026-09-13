@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_RENDERER_RENDERER_HPP
-#define RW_ENGINE_RENDERER_RENDERER_HPP
+#ifndef HORSE_RENDERER_RENDERER_HPP
+#define HORSE_RENDERER_RENDERER_HPP
 
 #include "Ecs/Ecs.hpp"
 #include "Renderer/PostProcess.hpp"

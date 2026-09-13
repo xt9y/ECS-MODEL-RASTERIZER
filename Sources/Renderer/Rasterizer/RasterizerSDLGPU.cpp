@@ -9,7 +9,7 @@
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneResourcesSDLGPU.hpp"
 #include "Renderer/ShadingState.hpp"
-#include "Window.hpp"
+#include "Window/Window.hpp"
 
 #include <SDL3/SDL.h>
 

@@ -1,5 +1,5 @@
-#ifndef RW_ENGINE_RENDERER_FONT_ATLAS_HPP
-#define RW_ENGINE_RENDERER_FONT_ATLAS_HPP
+#ifndef HORSE_RENDERER_FONT_ATLAS_HPP
+#define HORSE_RENDERER_FONT_ATLAS_HPP
 
 #include <cstdint>
 #include <vector>

@@ -1,7 +1,7 @@
-#ifndef RW_ENGINE_RENDERER_SCENES_SCENE_HPP
-#define RW_ENGINE_RENDERER_SCENES_SCENE_HPP
+#ifndef HORSE_RENDERER_SCENES_SCENE_HPP
+#define HORSE_RENDERER_SCENES_SCENE_HPP
 
-#include "Camera.hpp"
+#include "Camera/Camera.hpp"
 #include "Ecs/Ecs.hpp"
 #include "Models/Models.hpp"
 #include "Renderer/Components.hpp"

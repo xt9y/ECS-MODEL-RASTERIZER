@@ -5,7 +5,7 @@
 #include "Renderer/GaussianSplat/Projection.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/SDLGPU/Context.hpp"
-#include "Renderer/Systems/Scene.hpp"
+#include "Renderer/Scenes/Scene.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -198,7 +198,7 @@ bool ensureBuffer(
 }
 
 bool decoded(
-    const Systems::Scene::RenderItem& item,
+    const Scenes::Scene::RenderItem& item,
     const Models::GaussianSplat::Data **output,
     std::string *error)
 {
@@ -277,8 +277,8 @@ bool render(const Ecs::World& world, Internal::FrameOutput& output)
 {
     if (!output.color_texture || !output.command) return true;
 
-    std::vector<Systems::Scene::RenderItem> items;
-    Systems::Scene::collectGaussianItems(world, items);
+    std::vector<Scenes::Scene::RenderItem> items;
+    Scenes::Scene::collectGaussianItems(world, items);
     if (items.empty()) return true;
     if (!ensureCore()) return false;
 
@@ -288,7 +288,7 @@ bool render(const Ecs::World& world, Internal::FrameOutput& output)
         state.resource_revision = revision;
     }
 
-    const Systems::CameraState camera = Systems::cameraState(Systems::Scene::cameraState(world));
+    const Scenes::CameraState camera = Scenes::cameraState(Scenes::Scene::cameraState(world));
     if (!camera.valid || camera.projection != Camera::Projection::Perspective) return true;
 
     const std::uint32_t width = static_cast<std::uint32_t>(std::max(output.width, 1));
@@ -296,7 +296,7 @@ bool render(const Ecs::World& world, Internal::FrameOutput& output)
     if (!ensureOutput(width, height)) return false;
 
     std::vector<ProjectedSplat> projected;
-    for (const Systems::Scene::RenderItem& item : items) {
+    for (const Scenes::Scene::RenderItem& item : items) {
         if (!item.transform || !item.mesh_component || !item.mesh) continue;
         const Models::GaussianSplat::Data *data = nullptr;
         std::string error;
