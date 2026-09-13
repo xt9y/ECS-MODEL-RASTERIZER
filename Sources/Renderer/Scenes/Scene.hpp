@@ -28,6 +28,10 @@ struct LightState {
     Ecs::Entity entity = Ecs::INVALID_ENTITY;
     Transform transform{};
     LightComponent light{};
+    ShadowComponent shadow{};
+    VolumetricLightComponent volumetric{};
+    bool has_shadow = false;
+    bool has_volumetric = false;
     bool valid = false;
 };
 
@@ -71,6 +75,7 @@ struct RenderRevision {
 
 CameraState cameraState(const Ecs::World& world);
 LightState lightState(const Ecs::World& world);
+void collectLights(const Ecs::World& world, std::vector<LightState>& out);
 RenderRevision renderRevision(const Ecs::World& world);
 void collectRenderItems(const Ecs::World& world, std::vector<RenderItem>& out);
 void collectGaussianItems(const Ecs::World& world, std::vector<RenderItem>& out);
