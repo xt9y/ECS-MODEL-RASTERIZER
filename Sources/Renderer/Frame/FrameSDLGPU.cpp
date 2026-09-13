@@ -15,6 +15,9 @@ constexpr SDL_GPUTextureUsageFlags ColorUsage =
 constexpr SDL_GPUTextureUsageFlags VelocityUsage =
     SDL_GPU_TEXTUREUSAGE_COLOR_TARGET |
     SDL_GPU_TEXTUREUSAGE_SAMPLER;
+constexpr SDL_GPUTextureUsageFlags DepthUsage =
+    SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+    SDL_GPU_TEXTUREUSAGE_SAMPLER;
 constexpr SDL_GPUTextureUsageFlags LinearDepthUsage =
     SDL_GPU_TEXTUREUSAGE_SAMPLER |
     SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
@@ -39,7 +42,7 @@ bool Target::create()
 
     if (!supported(Renderer::SDLGPU::colorFormat(), ColorUsage) ||
         !supported(SDL_GPU_TEXTUREFORMAT_R16G16_FLOAT, VelocityUsage) ||
-        !supported(SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET) ||
+        !supported(SDL_GPU_TEXTUREFORMAT_D32_FLOAT, DepthUsage) ||
         !supported(SDL_GPU_TEXTUREFORMAT_R32_FLOAT, LinearDepthUsage))
     {
         std::fprintf(stderr, "[Frame/SDL_GPU]: required render-target formats are unavailable\n");
@@ -55,7 +58,7 @@ bool Target::create()
         static_cast<std::uint32_t>(width_), static_cast<std::uint32_t>(height_),
         "Horse Velocity");
     depth_ = Renderer::SDLGPU::createTexture(
-        SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+        SDL_GPU_TEXTUREFORMAT_D32_FLOAT, DepthUsage,
         static_cast<std::uint32_t>(width_), static_cast<std::uint32_t>(height_),
         "Horse Depth");
     linear_depth_ = Renderer::SDLGPU::createTexture(
