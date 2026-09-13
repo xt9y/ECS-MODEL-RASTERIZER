@@ -1,7 +1,5 @@
 #include "Renderer/ShadingState.hpp"
 
-#include "Renderer/Scenes/Scene.hpp"
-
 namespace Renderer::Internal {
 namespace {
 
@@ -17,7 +15,7 @@ void updateShadingState(const Ecs::World& world)
 {
     ShadingState& state = storage();
     state.environment = environmentState(world);
-    state.light = Renderer::Scenes::lightState(Renderer::Scenes::Scene::lightState(world));
+    state.lighting = Lighting::state(world);
 }
 
 const ShadingState& shadingState()
