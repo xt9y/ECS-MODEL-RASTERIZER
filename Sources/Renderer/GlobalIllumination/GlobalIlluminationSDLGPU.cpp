@@ -59,15 +59,6 @@ bool upload(const GlobalIllumination::Field *field)
         data[30] = std::max(environment.fog_end, environment.fog_start + 1.0e-4f); data[31] = environment.rotation_degrees * (Pi / 180.0f);
     }
 
-    if (const Scenes::LightState *light = Lighting::primary(shading.lighting)) {
-        const float inner = std::cos(light->inner_cone_degrees * (Pi / 180.0f));
-        const float outer = std::cos(light->outer_cone_degrees * (Pi / 180.0f));
-        data[32] = light->position.x; data[33] = light->position.y; data[34] = light->position.z; data[35] = std::max(light->intensity, 0.0f);
-        data[36] = light->direction.x; data[37] = light->direction.y; data[38] = light->direction.z;
-        data[39] = light->type == LightType::Point ? 1.0f : (light->type == LightType::Directional ? 2.0f : 3.0f);
-        data[40] = light->color.x; data[41] = light->color.y; data[42] = light->color.z; data[43] = std::max(light->range, 0.0f);
-        data[44] = inner; data[45] = outer;
-    }
     data[46] = static_cast<float>(light_count);
     data[47] = static_cast<float>(light_base);
 
