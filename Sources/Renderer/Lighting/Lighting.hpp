@@ -16,7 +16,6 @@ struct State {
 
 State state(const Ecs::World& world);
 std::uint64_t signature(const State& state);
-const Scenes::LightState *primary(const State& state);
 
 } // namespace Renderer::Lighting
 
