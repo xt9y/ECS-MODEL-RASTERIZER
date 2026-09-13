@@ -3,6 +3,7 @@
 
 #include "Renderer/Trace/Metal/AdvancedMaterialShaders.hpp"
 
+#include <cctype>
 #include <string>
 
 namespace Renderer::Trace::Metal {
@@ -13,6 +14,13 @@ inline void insertAdvancedMaterialArgument(std::string& source, const char *next
     const std::size_t next_length = std::char_traits<char>::length(next_argument);
     std::size_t position = 0u;
     while ((position = source.find(marker, position)) != std::string::npos) {
+        if (position > 0u) {
+            const unsigned char previous = static_cast<unsigned char>(source[position - 1u]);
+            if (std::isalnum(previous) != 0 || previous == '_') {
+                position += marker.size();
+                continue;
+            }
+        }
         std::size_t next = position + marker.size();
         while (next < source.size() &&
                (source[next] == ' ' || source[next] == '\t' || source[next] == '\r' || source[next] == '\n'))
