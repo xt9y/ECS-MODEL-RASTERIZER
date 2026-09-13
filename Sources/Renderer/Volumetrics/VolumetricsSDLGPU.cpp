@@ -1,12 +1,11 @@
 #include "Renderer/Volumetrics/VolumetricsSDLGPU.hpp"
 
-#include "Renderer/Lighting/LightingSDLGPU.hpp"
+#include "Renderer/GlobalIllumination/GlobalIlluminationSDLGPU.hpp"
 #include "Renderer/Renderer.hpp"
 #include "Renderer/SDLGPU/Context.hpp"
 #include "Renderer/SDLGPU/Uniforms.hpp"
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneResourcesSDLGPU.hpp"
-#include "Renderer/ShadingState.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -31,7 +30,7 @@ struct GpuTriangle {
 
 StructuredBuffer<GpuNode> Nodes : register(t0, space0);
 StructuredBuffer<GpuTriangle> Triangles : register(t1, space0);
-StructuredBuffer<float4> Lights : register(t2, space0);
+StructuredBuffer<float4> Shading : register(t2, space0);
 RWTexture2D<float4> Output : register(u0, space1);
 Texture2D<float> SceneDepth : register(t0, space2);
 SamplerState DepthSampler : register(s0, space2);
@@ -186,12 +185,13 @@ float Phase(float cosine_theta)
 
 float3 LightScattering(uint index, float3 position, float3 ray_direction)
 {
-    uint offset = 1u + index * 5u;
-    float4 position_intensity = Lights[offset + 0u];
-    float4 direction_type = Lights[offset + 1u];
-    float4 color_range = Lights[offset + 2u];
-    float4 cone_shadow = Lights[offset + 3u];
-    float4 volumetric = Lights[offset + 4u];
+    uint light_base = (uint)max(Shading[11].w, 12.0);
+    uint offset = light_base + index * 5u;
+    float4 position_intensity = Shading[offset + 0u];
+    float4 direction_type = Shading[offset + 1u];
+    float4 color_range = Shading[offset + 2u];
+    float4 cone_shadow = Shading[offset + 3u];
+    float4 volumetric = Shading[offset + 4u];
     if (volumetric.y < 0.5 || volumetric.x <= 0.0 || position_intensity.w <= 0.0)
         return 0.0.xxx;
 
@@ -243,7 +243,7 @@ void Main(uint3 tid : SV_DispatchThreadID)
     float grain = Random(tid.x + tid.y * width + FrameIndex * 747796405u + 1u);
     float first = lerp(0.5, grain, saturate(Jitter));
     float3 scattering = 0.0.xxx;
-    uint light_count = (uint)max(Lights[0].x, 0.0);
+    uint light_count = (uint)max(Shading[11].z, 0.0);
 
     for (uint sample = 0u; sample < samples; ++sample) {
         float distance_along_ray = min((sample + first) * step_length, ray_length);
@@ -565,7 +565,7 @@ bool march(
     SDL_GPUTexture *depth,
     const SDLGPU::FrameUniforms& frame,
     const VolumetricUniforms& uniforms,
-    const Lighting::State& lighting)
+    const GlobalIllumination::Field *global_illumination)
 {
     SDL_PushGPUComputeUniformData(command, 0u, &frame, sizeof frame);
     SDL_PushGPUComputeUniformData(command, 1u, &uniforms, sizeof uniforms);
@@ -578,10 +578,10 @@ bool march(
 
     SDL_GPUBuffer *visibility[] = {scene.nodeBuffer(), scene.triangleBuffer()};
     SDL_BindGPUComputeStorageBuffers(pass, 0u, visibility, 2u);
-    const bool light_ok = bindLightingSDLGPU(pass, lighting, 2u);
+    const bool shading_ok = bindGlobalIlluminationSDLGPU(pass, global_illumination, 2u);
     const SDL_GPUTextureSamplerBinding depth_binding{depth, state.nearest_sampler};
     SDL_BindGPUComputeSamplers(pass, 0u, &depth_binding, 1u);
-    if (light_ok) {
+    if (shading_ok) {
         SDL_DispatchGPUCompute(
             pass,
             (static_cast<Uint32>(state.volume_width) + 7u) / 8u,
@@ -589,7 +589,7 @@ bool march(
             1u);
     }
     SDL_EndGPUComputePass(pass);
-    return light_ok;
+    return shading_ok;
 }
 
 SDL_GPUTexture *blur(
@@ -693,8 +693,7 @@ bool renderVolumetricsSDLGPU(
         settings.depth_falloff,
     };
 
-    const Lighting::State& lighting = shadingState().lighting;
-    if (!march(command, *scene, depth, frame, uniforms, lighting)) return false;
+    if (!march(command, *scene, depth, frame, uniforms, output.global_illumination)) return false;
     SDL_GPUTexture *filtered = blur(command, settings.blur_passes, settings.depth_falloff);
     if (!filtered || !composite(command, color, depth, filtered, frame, uniforms)) return false;
     ++state.frame_index;
@@ -704,7 +703,6 @@ bool renderVolumetricsSDLGPU(
 void shutdownVolumetricsSDLGPU()
 {
     destroyTargets();
-    shutdownLightingSDLGPU();
     SDL_GPUDevice *device = Renderer::SDLGPU::device();
     if (device) {
         if (state.nearest_sampler) SDL_ReleaseGPUSampler(device, state.nearest_sampler);
