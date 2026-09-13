@@ -107,3 +107,13 @@ jobs:
       - name: RendererCheck
         working-directory: GAME
         run: renderercheck run
+
+      - name: Preserve RendererCheck diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderercheck-diagnostics
+          path: |
+            GAME/.rendercheck
+          if-no-files-found: error
+          retention-days: 1
