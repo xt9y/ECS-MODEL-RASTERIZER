@@ -13,7 +13,8 @@
 namespace Renderer::Internal {
 namespace {
 
-constexpr std::size_t HeaderVec4Count = 12u;
+constexpr std::size_t HeaderVec4Count = 9u;
+constexpr std::size_t LightVec4Count = 5u;
 constexpr float Pi = 3.14159265358979323846f;
 
 SDL_GPUBuffer *buffer = nullptr;
@@ -35,8 +36,10 @@ bool upload(const GlobalIllumination::Field *field)
         lighting_revision == uploaded_lighting && valid == uploaded_valid)
         return true;
 
+    const std::size_t light_count = shading.lighting.lights.size();
+    const std::size_t light_end = HeaderVec4Count + light_count * LightVec4Count;
     const std::size_t probe_count = valid ? field->probes.size() : 0u;
-    std::vector<float> data((HeaderVec4Count + probe_count * 4u) * 4u, 0.0f);
+    std::vector<float> data((light_end + probe_count * 4u) * 4u, 0.0f);
 
     if (valid) {
         data[0] = field->minimum.x; data[1] = field->minimum.y; data[2] = field->minimum.z; data[3] = 1.0f;
@@ -56,22 +59,41 @@ bool upload(const GlobalIllumination::Field *field)
         data[30] = std::max(environment.fog_end, environment.fog_start + 1.0e-4f); data[31] = environment.rotation_degrees * (Pi / 180.0f);
     }
 
-    const Renderer::Scenes::LightState *light = Lighting::primary(shading.lighting);
-    if (light && light->valid) {
-        const float inner = std::cos(light->inner_cone_degrees * (Pi / 180.0f));
-        const float outer = std::cos(light->outer_cone_degrees * (Pi / 180.0f));
-        data[32] = light->position.x; data[33] = light->position.y; data[34] = light->position.z; data[35] = std::max(light->intensity, 0.0f);
-        data[36] = light->direction.x; data[37] = light->direction.y; data[38] = light->direction.z;
-        data[39] = light->type == LightType::Point ? 1.0f : (light->type == LightType::Directional ? 2.0f : 3.0f);
-        data[40] = light->color.x; data[41] = light->color.y; data[42] = light->color.z; data[43] = std::max(light->range, 0.0f);
-        data[44] = inner; data[45] = outer;
+    data[32] = static_cast<float>(light_count);
+    for (std::size_t index = 0u; index < light_count; ++index) {
+        const Scenes::LightState& light = shading.lighting.lights[index];
+        const float inner = std::cos(light.inner_cone_degrees * (Pi / 180.0f));
+        const float outer = std::cos(light.outer_cone_degrees * (Pi / 180.0f));
+        const float type = light.type == LightType::Point
+            ? 1.0f
+            : (light.type == LightType::Directional ? 2.0f : 3.0f);
+        const std::size_t offset = (HeaderVec4Count + index * LightVec4Count) * 4u;
+
+        data[offset + 0u] = light.position.x;
+        data[offset + 1u] = light.position.y;
+        data[offset + 2u] = light.position.z;
+        data[offset + 3u] = std::max(light.intensity, 0.0f);
+        data[offset + 4u] = light.direction.x;
+        data[offset + 5u] = light.direction.y;
+        data[offset + 6u] = light.direction.z;
+        data[offset + 7u] = type;
+        data[offset + 8u] = light.color.x;
+        data[offset + 9u] = light.color.y;
+        data[offset + 10u] = light.color.z;
+        data[offset + 11u] = std::max(light.range, 0.0f);
+        data[offset + 12u] = inner;
+        data[offset + 13u] = outer;
+        data[offset + 14u] = light.shadows ? 1.0f : 0.0f;
+        data[offset + 15u] = std::max(light.shadow_bias, 0.0f);
+        data[offset + 16u] = std::max(light.volumetric_intensity, 0.0f);
+        data[offset + 17u] = light.volumetric ? 1.0f : 0.0f;
     }
 
     if (valid) {
         for (std::size_t probe = 0; probe < probe_count; ++probe) {
             for (std::size_t coefficient = 0; coefficient < 4u; ++coefficient) {
                 const Vec3 value = field->probes[probe].sh[coefficient];
-                const std::size_t offset = (HeaderVec4Count + probe * 4u + coefficient) * 4u;
+                const std::size_t offset = (light_end + probe * 4u + coefficient) * 4u;
                 data[offset] = value.x;
                 data[offset + 1u] = value.y;
                 data[offset + 2u] = value.z;
@@ -85,7 +107,7 @@ bool upload(const GlobalIllumination::Field *field)
             SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ,
             bytes,
             data.data(),
-            "Horse Global Illumination");
+            "Horse Shading State");
         if (!replacement) return false;
         if (buffer) SDL_ReleaseGPUBuffer(Renderer::SDLGPU::device(), buffer);
         buffer = replacement;
