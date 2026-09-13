@@ -63,6 +63,7 @@ struct CameraState {
 };
 
 struct LightState {
+    Ecs::Entity entity = Ecs::INVALID_ENTITY;
     bool valid = false;
     LightType type = LightType::Point;
     Vec3 position{};
@@ -72,6 +73,10 @@ struct LightState {
     float range = 0.0f;
     float inner_cone_degrees = 20.0f;
     float outer_cone_degrees = 30.0f;
+    bool shadows = false;
+    float shadow_bias = 0.002f;
+    bool volumetric = false;
+    float volumetric_intensity = 0.0f;
 };
 
 class SceneCache {
