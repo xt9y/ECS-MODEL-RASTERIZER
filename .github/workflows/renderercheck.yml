@@ -116,5 +116,6 @@ jobs:
           name: renderercheck-diagnostics
           path: |
             GAME/.rendercheck
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
