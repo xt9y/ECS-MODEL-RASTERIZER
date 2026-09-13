@@ -4,6 +4,7 @@
 #include "Renderer/Debug/Debug.hpp"
 #include "Renderer/GaussianSplat/GaussianSplat.hpp"
 #include "Renderer/Renderer.hpp"
+#include "Renderer/Volumetrics/Volumetrics.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -88,6 +89,7 @@ public:
         }
         Debug::shutdown();
         GaussianSplat::shutdown();
+        Volumetrics::shutdown();
         for (auto iterator = entries_.rbegin(); iterator != entries_.rend(); ++iterator) {
             if (iterator->renderer) iterator->renderer->shutdown();
             iterator->available = false;
