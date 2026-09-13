@@ -624,18 +624,6 @@ struct ImageDesc {
     std::uint32_t alpha_length = 0u;
 };
 
-[[maybe_unused]] bool checkedSection(
-    std::size_t offset,
-    std::size_t length,
-    std::size_t size,
-    const std::uint8_t **out,
-    std::string *error)
-{
-    if (!out || offset > size || length > size - offset) return fail(error, "BasisLZ section exceeds bounds");
-    *out = nullptr;
-    return true;
-}
-
 } // namespace
 
 bool decodeKtx2BaseLevel(
