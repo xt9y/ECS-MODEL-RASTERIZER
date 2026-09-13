@@ -162,6 +162,7 @@ bool Rasterizer::renderScene(const Ecs::World& world, Internal::FrameOutput& out
         return false;
     }
     if (!impl_->frame.begin(output)) return false;
+    output.scene_resources = &impl_->scene;
 
     auto *command = static_cast<SDL_GPUCommandBuffer *>(output.command);
     SDL_GPUColorTargetInfo colors[2]{};
