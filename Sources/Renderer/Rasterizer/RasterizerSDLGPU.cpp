@@ -253,20 +253,8 @@ bool Rasterizer::initialized() const { return impl_ && impl_->initialized; }
 bool Rasterizer::enabled() const { return impl_ && impl_->settings.enabled; }
 void Rasterizer::setEnabled(bool enabled) { if (impl_) impl_->settings.enabled = enabled; }
 void Rasterizer::setViewportCulling(bool value) { if (impl_) impl_->settings.viewport_culling = value; }
-void Rasterizer::setShadowResolution(int value) { if (impl_) impl_->settings.shadow_resolution = value; }
-void Rasterizer::setFallbackShadowResolution(int value) { if (impl_) impl_->settings.fallback_shadow_resolution = value; }
-void Rasterizer::setMinimumShadowResolution(int value) { if (impl_) impl_->settings.minimum_shadow_resolution = value; }
-void Rasterizer::setShadowNearPlane(float value) { if (impl_) impl_->settings.shadow_near_plane = value; }
-void Rasterizer::setShadowFarScale(float value) { if (impl_) impl_->settings.shadow_far_scale = value; }
-void Rasterizer::setDirectionalShadowDistance(float value) { if (impl_) impl_->settings.directional_shadow_distance = std::max(value, 1.0f); }
 void Rasterizer::setClearColor(Vec4 value) { if (impl_) impl_->settings.clear_color = value; }
 bool Rasterizer::viewportCulling() const { return impl_ && impl_->settings.viewport_culling; }
-int Rasterizer::shadowResolution() const { return impl_ ? impl_->settings.shadow_resolution : 0; }
-int Rasterizer::fallbackShadowResolution() const { return impl_ ? impl_->settings.fallback_shadow_resolution : 0; }
-int Rasterizer::minimumShadowResolution() const { return impl_ ? impl_->settings.minimum_shadow_resolution : 0; }
-float Rasterizer::shadowNearPlane() const { return impl_ ? impl_->settings.shadow_near_plane : 0.0f; }
-float Rasterizer::shadowFarScale() const { return impl_ ? impl_->settings.shadow_far_scale : 0.0f; }
-float Rasterizer::directionalShadowDistance() const { return impl_ ? impl_->settings.directional_shadow_distance : 0.0f; }
 Vec4 Rasterizer::clearColor() const { return impl_ ? impl_->settings.clear_color : Vec4{}; }
 RasterizerSettings& Rasterizer::settings() { return impl_->settings; }
 const RasterizerSettings& Rasterizer::settings() const { return impl_->settings; }
