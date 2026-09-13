@@ -9,6 +9,7 @@
 #include "Renderer/SDLGPU/Uniforms.hpp"
 #include "Renderer/Scenes/Scene.hpp"
 #include "Renderer/Scenes/SceneResourcesSDLGPU.hpp"
+#include "Renderer/ShadingState.hpp"
 #include "Window/Window.hpp"
 
 #include <SDL3/SDL.h>
@@ -435,13 +436,13 @@ bool PathTracer::renderScene(const Ecs::World& world, Internal::FrameOutput& out
     if (sync.scene_changed) impl_->progressive.sceneChanged();
 
     const Scenes::CameraState camera = Scenes::cameraState(Scenes::Scene::cameraState(world));
-    const Scenes::LightState light = Scenes::lightState(Scenes::Scene::lightState(world));
     impl_->progressive.updateCamera(Scenes::cameraSignature(camera));
-    impl_->progressive.updateLight(Scenes::lightSignature(light));
+    impl_->progressive.updateLight(Internal::shadingState().lighting.revision);
     impl_->progressive.updateGlobalIllumination(
         globalIlluminationSignature(output.global_illumination));
 
     if (!impl_->frame.begin(output)) return false;
+    output.scene_resources = &impl_->scene;
     if (!impl_->active() || !camera.valid || impl_->scene.triangleCount() == 0u) {
         output.depth = Internal::DepthSource::None;
         output.depth_texture = nullptr;
