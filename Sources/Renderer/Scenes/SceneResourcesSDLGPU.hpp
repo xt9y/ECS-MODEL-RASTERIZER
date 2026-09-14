@@ -51,10 +51,10 @@ public:
 private:
     bool syncBuffers(std::string *error);
     bool syncTextures(std::string *error);
-    bool replaceBuffer(
+    bool ensureBuffer(
         SDL_GPUBuffer *&target,
+        std::size_t& capacity,
         SDL_GPUBufferUsageFlags usage,
-        const void *data,
         std::size_t bytes,
         const char *label
     );
@@ -69,6 +69,10 @@ private:
     SDL_GPUBuffer *triangles_ = nullptr;
     SDL_GPUBuffer *base_materials_ = nullptr;
     SDL_GPUBuffer *materials_buffer_ = nullptr;
+    std::size_t node_capacity_ = 0u;
+    std::size_t triangle_capacity_ = 0u;
+    std::size_t base_material_capacity_ = 0u;
+    std::size_t material_capacity_ = 0u;
     SDL_GPUTexture *white_ = nullptr;
     SDL_GPUSampler *sampler_ = nullptr;
     std::unordered_map<Models::TextureHandle, SDL_GPUTexture *> texture_cache_;

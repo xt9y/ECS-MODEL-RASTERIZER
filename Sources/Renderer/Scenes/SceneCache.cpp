@@ -2,7 +2,10 @@
 
 #include "Animation/Animation.hpp"
 #include "Camera/Camera.hpp"
+#include "Models/Core/MeshRevision.hpp"
 #include "Models/Core/Texture.hpp"
+#include "Models/Runtime.hpp"
+#include "Renderer/DynamicGeometry.hpp"
 #include "Renderer/Environment.hpp"
 #include "Renderer/Math.hpp"
 
@@ -91,6 +94,172 @@ Vec3 triangleCentroid(const GpuTriangle& triangle)
     };
 }
 
+struct PreparedItem {
+    const Scene::RenderItem *item = nullptr;
+    const Models::Runtime::DeformedPart *deformed = nullptr;
+    std::vector<Vec3> positions;
+    std::vector<Vec3> normals;
+    std::uint32_t material_index = 0u;
+    bool valid = false;
+};
+
+struct DeformationKey {
+    Models::ModelHandle model = Models::INVALID_MODEL;
+    std::uint32_t part = Models::INVALID_INDEX;
+    Ecs::Entity pose_entity = Ecs::INVALID_ENTITY;
+    std::uint64_t pose_revision = 0u;
+
+    bool operator==(const DeformationKey&) const = default;
+};
+
+struct DeformationKeyHash {
+    std::size_t operator()(const DeformationKey& key) const
+    {
+        std::uint64_t hash = 1469598103934665603ull;
+        hashValue(hash, key.model);
+        hashValue(hash, key.part);
+        hashValue(hash, key.pose_entity);
+        hashValue(hash, key.pose_revision);
+        return static_cast<std::size_t>(hash);
+    }
+};
+
+using DeformationCache = std::unordered_map<
+    DeformationKey,
+    Models::Runtime::DeformedPart,
+    DeformationKeyHash>;
+
+const std::vector<Models::Vertex>& vertices(const PreparedItem& prepared)
+{
+    return prepared.deformed ? prepared.deformed->vertices : prepared.item->mesh->vertices;
+}
+
+bool prepareItem(
+    const Ecs::World& world,
+    const Scene::RenderItem& item,
+    const std::unordered_map<Models::MaterialHandle, std::uint32_t>& material_indices,
+    DeformationCache& deformations,
+    PreparedItem *prepared,
+    std::string *error)
+{
+    if (!prepared) return false;
+    *prepared = {};
+    if (!item.mesh_component || !item.transform || !item.mesh) return true;
+    if (item.mesh->indices.size() < 3u || item.mesh->vertices.empty()) return true;
+    if (item.material && item.material->opacity < SceneCache::opacityCutoff()) return true;
+
+    prepared->item = &item;
+    if (const auto material = material_indices.find(item.mesh_component->material);
+        material != material_indices.end())
+        prepared->material_index = material->second;
+
+    const ModelDeformComponent *deform = world.get<ModelDeformComponent>(item.entity);
+    if (deform) {
+        const ModelPoseComponent *pose = world.get<ModelPoseComponent>(deform->pose_entity);
+        if (!pose) {
+            if (error) *error = "dynamic model geometry has no pose state";
+            return false;
+        }
+        const DeformationKey key{
+            deform->model,
+            deform->part,
+            deform->pose_entity,
+            pose->revision,
+        };
+        auto [deformed, inserted] = deformations.try_emplace(key);
+        if (inserted && !Models::Runtime::deformPart(
+                deform->model,
+                deform->part,
+                pose->pose,
+                &deformed->second,
+                error)) {
+            deformations.erase(deformed);
+            return false;
+        }
+        prepared->deformed = &deformed->second;
+    }
+
+    const auto& source_vertices = vertices(*prepared);
+    const Math::Mat4 model = modelMatrix(*item.transform);
+    const Math::Mat4 world_to_object = inverseModelMatrix(*item.transform);
+
+    const Animation::Pose *pose = nullptr;
+    if (!prepared->deformed) {
+        const Animation::SkinBindingComponent *binding =
+            world.get<Animation::SkinBindingComponent>(item.entity);
+        if (binding && binding->animator != Ecs::INVALID_ENTITY) {
+            const Animation::AnimatorComponent *animator =
+                world.get<Animation::AnimatorComponent>(binding->animator);
+            if (animator && !animator->pose.skin.empty()) pose = &animator->pose;
+        }
+    }
+
+    prepared->positions.resize(source_vertices.size());
+    prepared->normals.resize(source_vertices.size());
+    for (std::size_t index = 0u; index < source_vertices.size(); ++index) {
+        const Models::Vertex& vertex = source_vertices[index];
+        Vec3 local_position{vertex.position.x, vertex.position.y, vertex.position.z};
+        Vec3 local_normal{vertex.normal.x, vertex.normal.y, vertex.normal.z};
+
+        if (pose) {
+            Animation::Vec3 skinned_position{};
+            Animation::Vec3 skinned_normal{};
+            Animation::skinVertex(
+                *pose,
+                vertex.skin,
+                {local_position.x, local_position.y, local_position.z},
+                {local_normal.x, local_normal.y, local_normal.z},
+                &skinned_position,
+                &skinned_normal
+            );
+            local_position = {skinned_position.x, skinned_position.y, skinned_position.z};
+            local_normal = {skinned_normal.x, skinned_normal.y, skinned_normal.z};
+        }
+
+        prepared->positions[index] = transformPoint(model, local_position);
+        prepared->normals[index] = transformNormal(world_to_object, local_normal);
+    }
+    prepared->valid = true;
+    return true;
+}
+
+bool triangleFor(
+    const PreparedItem& prepared,
+    std::uint32_t triangle_index,
+    GpuTriangle *triangle)
+{
+    if (!triangle || !prepared.valid || !prepared.item || !prepared.item->mesh) return false;
+    const Models::MeshData& mesh = *prepared.item->mesh;
+    const auto& source_vertices = vertices(prepared);
+    const std::size_t offset = static_cast<std::size_t>(triangle_index) * 3u;
+    if (offset + 2u >= mesh.indices.size()) return false;
+    const std::uint32_t i0 = mesh.indices[offset + 0u];
+    const std::uint32_t i1 = mesh.indices[offset + 1u];
+    const std::uint32_t i2 = mesh.indices[offset + 2u];
+    if (i0 >= source_vertices.size() || i1 >= source_vertices.size() || i2 >= source_vertices.size())
+        return false;
+
+    const Models::Vertex& v0 = source_vertices[i0];
+    const Models::Vertex& v1 = source_vertices[i1];
+    const Models::Vertex& v2 = source_vertices[i2];
+    const Vec3& p0 = prepared.positions[i0];
+    const Vec3& p1 = prepared.positions[i1];
+    const Vec3& p2 = prepared.positions[i2];
+    const Vec3& n0 = prepared.normals[i0];
+    const Vec3& n1 = prepared.normals[i1];
+    const Vec3& n2 = prepared.normals[i2];
+
+    triangle->p0 = {p0.x, p0.y, p0.z, std::bit_cast<float>(prepared.material_index)};
+    triangle->p1 = {p1.x, p1.y, p1.z, std::bit_cast<float>(prepared.item->entity)};
+    triangle->p2 = {p2.x, p2.y, p2.z, 0.0f};
+    triangle->n0 = {n0.x, n0.y, n0.z, 0.0f};
+    triangle->n1 = {n1.x, n1.y, n1.z, 0.0f};
+    triangle->n2 = {n2.x, n2.y, n2.z, 0.0f};
+    triangle->uv01 = {v0.uv.x, v0.uv.y, v1.uv.x, v1.uv.y};
+    triangle->uv2 = {v2.uv.x, v2.uv.y, 0.0f, 0.0f};
+    return true;
+}
+
 bool textureHasTransparency(Models::TextureHandle handle)
 {
     const Models::TextureAsset *asset = Models::texture(handle);
@@ -176,9 +345,20 @@ std::uint64_t SceneCache::signature(
     for (const Scene::RenderItem& item : items) {
         if (!item.mesh_component || !item.transform) continue;
         hashValue(hash, item.entity);
+        hashValue(hash, item.instance_index);
         hashValue(hash, item.mesh_component->mesh);
+        hashValue(hash, Models::Internal::meshRevision(item.mesh_component->mesh));
         hashValue(hash, item.mesh_component->material);
         hashTransform(hash, *item.transform);
+
+        const ModelDeformComponent *deform = world.get<ModelDeformComponent>(item.entity);
+        if (deform && deform->pose_entity != Ecs::INVALID_ENTITY) {
+            hashValue(hash, deform->model);
+            hashValue(hash, deform->part);
+            hashValue(hash, deform->pose_entity);
+            if (const ModelPoseComponent *pose = world.get<ModelPoseComponent>(deform->pose_entity))
+                hashValue(hash, pose->revision);
+        }
 
         const Animation::SkinBindingComponent *binding =
             world.get<Animation::SkinBindingComponent>(item.entity);
@@ -190,6 +370,21 @@ std::uint64_t SceneCache::signature(
                 hashValue(hash, animator->pose.revision);
             }
         }
+    }
+    return hash;
+}
+
+std::uint64_t SceneCache::topologySignature(const std::vector<Scene::RenderItem>& items) const
+{
+    std::uint64_t hash = 1469598103934665603ull;
+    hashValue(hash, config_revision_);
+    for (const Scene::RenderItem& item : items) {
+        if (!item.mesh_component || !item.mesh) continue;
+        hashValue(hash, item.entity);
+        hashValue(hash, item.instance_index);
+        hashValue(hash, item.mesh_component->mesh);
+        hashValue(hash, Models::Internal::meshTopologyRevision(item.mesh_component->mesh));
+        hashValue(hash, item.material && item.material->opacity < opacity_cutoff_ ? 0u : 1u);
     }
     return hash;
 }
@@ -207,7 +402,10 @@ std::uint64_t SceneCache::resourceSignature(
     return hash;
 }
 
-std::uint32_t SceneCache::buildNode(std::uint32_t start, std::uint32_t count)
+std::uint32_t SceneCache::buildNode(
+    std::uint32_t start,
+    std::uint32_t count,
+    std::vector<std::uint32_t>& order)
 {
     const float infinity = std::numeric_limits<float>::infinity();
     Vec3 bounds_min{infinity, infinity, infinity};
@@ -216,7 +414,7 @@ std::uint32_t SceneCache::buildNode(std::uint32_t start, std::uint32_t count)
     Vec3 centroid_max{-infinity, -infinity, -infinity};
 
     for (std::uint32_t index = 0u; index < count; ++index) {
-        const GpuTriangle& triangle = triangles_[start + index];
+        const GpuTriangle& triangle = triangles_[order[start + index]];
         const Vec3 p0{triangle.p0[0], triangle.p0[1], triangle.p0[2]};
         const Vec3 p1{triangle.p1[0], triangle.p1[1], triangle.p1[2]};
         const Vec3 p2{triangle.p2[0], triangle.p2[1], triangle.p2[2]};
@@ -251,20 +449,59 @@ std::uint32_t SceneCache::buildNode(std::uint32_t start, std::uint32_t count)
     const std::uint32_t left_count = count / 2u;
     const std::uint32_t middle = start + left_count;
     std::nth_element(
-        triangles_.begin() + start,
-        triangles_.begin() + middle,
-        triangles_.begin() + start + count,
-        [axis](const GpuTriangle& a, const GpuTriangle& b) {
-            return component(triangleCentroid(a), axis) < component(triangleCentroid(b), axis);
+        order.begin() + start,
+        order.begin() + middle,
+        order.begin() + start + count,
+        [&](std::uint32_t a, std::uint32_t b) {
+            return component(triangleCentroid(triangles_[a]), axis) <
+                component(triangleCentroid(triangles_[b]), axis);
         }
     );
 
-    const std::uint32_t left = buildNode(start, left_count);
-    const std::uint32_t right = buildNode(middle, count - left_count);
+    const std::uint32_t left = buildNode(start, left_count, order);
+    const std::uint32_t right = buildNode(middle, count - left_count, order);
     nodes_[node_index].first = left;
     nodes_[node_index].meta = right;
     nodes_[node_index].extra[0] = static_cast<std::uint32_t>(nodes_.size());
     return node_index;
+}
+
+void SceneCache::refitNodes()
+{
+    for (std::size_t index = nodes_.size(); index-- > 0u;) {
+        GpuNode& node = nodes_[index];
+        const float infinity = std::numeric_limits<float>::infinity();
+        Vec3 bounds_min{infinity, infinity, infinity};
+        Vec3 bounds_max{-infinity, -infinity, -infinity};
+
+        if ((node.meta & LeafBit) != 0u) {
+            const std::uint32_t count = node.meta & ~LeafBit;
+            for (std::uint32_t triangle_index = 0u; triangle_index < count; ++triangle_index) {
+                const GpuTriangle& triangle = triangles_[node.first + triangle_index];
+                const Vec3 p0{triangle.p0[0], triangle.p0[1], triangle.p0[2]};
+                const Vec3 p1{triangle.p1[0], triangle.p1[1], triangle.p1[2]};
+                const Vec3 p2{triangle.p2[0], triangle.p2[1], triangle.p2[2]};
+                bounds_min = minVec(bounds_min, minVec(p0, minVec(p1, p2)));
+                bounds_max = maxVec(bounds_max, maxVec(p0, maxVec(p1, p2)));
+            }
+        } else {
+            const GpuNode& left = nodes_[node.first];
+            const GpuNode& right = nodes_[node.meta];
+            bounds_min = minVec(
+                {left.min_x, left.min_y, left.min_z},
+                {right.min_x, right.min_y, right.min_z});
+            bounds_max = maxVec(
+                {left.max_x, left.max_y, left.max_z},
+                {right.max_x, right.max_y, right.max_z});
+        }
+
+        node.min_x = bounds_min.x;
+        node.min_y = bounds_min.y;
+        node.min_z = bounds_min.z;
+        node.max_x = bounds_max.x;
+        node.max_y = bounds_max.y;
+        node.max_z = bounds_max.z;
+    }
 }
 
 bool SceneCache::sync(
@@ -306,9 +543,23 @@ bool SceneCache::sync(
         ++resource_updates_;
     }
 
+    const std::uint64_t current_topology_signature = topologySignature(items);
     const std::uint64_t current_geometry_signature = signature(world, items);
-    if (!geometry_initialized_ || current_geometry_signature != geometry_signature_) {
+    if (!topology_initialized_ || current_topology_signature != topology_signature_) {
         if (!rebuildGeometry(world, items, error)) {
+            clear();
+            return false;
+        }
+        topology_signature_ = current_topology_signature;
+        topology_initialized_ = true;
+        ++topology_revision_;
+        ++topology_updates_;
+        geometry_signature_ = current_geometry_signature;
+        geometry_initialized_ = true;
+        ++geometry_revision_;
+        ++geometry_updates_;
+    } else if (!geometry_initialized_ || current_geometry_signature != geometry_signature_) {
+        if (!updateGeometry(world, items, error)) {
             clear();
             return false;
         }
@@ -428,101 +679,102 @@ bool SceneCache::rebuildGeometry(
     const std::vector<Scene::RenderItem>& items,
     std::string *error)
 {
-    (void)error;
     nodes_.clear();
     triangles_.clear();
+    triangle_sources_.clear();
+    DeformationCache deformations;
 
-    std::vector<Vec3> positions;
-    std::vector<Vec3> normals;
-
-    for (const Scene::RenderItem& item : items) {
+    for (std::size_t item_index = 0u; item_index < items.size(); ++item_index) {
         if (triangles_.size() >= maximum_triangles_) break;
-        if (!item.mesh_component || !item.transform || !item.mesh) continue;
+        PreparedItem prepared;
+        if (!prepareItem(
+                world,
+                items[item_index],
+                material_indices_,
+                deformations,
+                &prepared,
+                error)) return false;
+        if (!prepared.valid) continue;
 
-        const Models::MeshData *mesh = item.mesh;
-        if (mesh->indices.size() < 3u || mesh->vertices.empty()) continue;
-        if (item.material && item.material->opacity < opacity_cutoff_) continue;
-
-        std::uint32_t material_index = 0u;
-        const auto material = material_indices_.find(item.mesh_component->material);
-        if (material != material_indices_.end()) material_index = material->second;
-
-        const Math::Mat4 model = modelMatrix(*item.transform);
-        const Math::Mat4 world_to_object = inverseModelMatrix(*item.transform);
-
-        const Animation::Pose *pose = nullptr;
-        const Animation::SkinBindingComponent *binding =
-            world.get<Animation::SkinBindingComponent>(item.entity);
-        if (binding && binding->animator != Ecs::INVALID_ENTITY) {
-            const Animation::AnimatorComponent *animator =
-                world.get<Animation::AnimatorComponent>(binding->animator);
-            if (animator && !animator->pose.skin.empty()) pose = &animator->pose;
-        }
-
-        positions.resize(mesh->vertices.size());
-        normals.resize(mesh->vertices.size());
-        for (std::size_t index = 0u; index < mesh->vertices.size(); ++index) {
-            const Models::Vertex& vertex = mesh->vertices[index];
-            Vec3 local_position{vertex.position.x, vertex.position.y, vertex.position.z};
-            Vec3 local_normal{vertex.normal.x, vertex.normal.y, vertex.normal.z};
-
-            if (pose) {
-                Animation::Vec3 skinned_position{};
-                Animation::Vec3 skinned_normal{};
-                Animation::skinVertex(
-                    *pose,
-                    vertex.skin,
-                    {local_position.x, local_position.y, local_position.z},
-                    {local_normal.x, local_normal.y, local_normal.z},
-                    &skinned_position,
-                    &skinned_normal
-                );
-                local_position = {skinned_position.x, skinned_position.y, skinned_position.z};
-                local_normal = {skinned_normal.x, skinned_normal.y, skinned_normal.z};
-            }
-
-            positions[index] = transformPoint(model, local_position);
-            normals[index] = transformNormal(world_to_object, local_normal);
-        }
-
-        const std::size_t triangle_count = mesh->indices.size() / 3u;
+        const std::size_t triangle_count = prepared.item->mesh->indices.size() / 3u;
         for (std::size_t triangle_index = 0u; triangle_index < triangle_count; ++triangle_index) {
             if (triangles_.size() >= maximum_triangles_) break;
-            const std::size_t offset = triangle_index * 3u;
-            const std::uint32_t i0 = mesh->indices[offset + 0u];
-            const std::uint32_t i1 = mesh->indices[offset + 1u];
-            const std::uint32_t i2 = mesh->indices[offset + 2u];
-            if (i0 >= mesh->vertices.size() || i1 >= mesh->vertices.size() || i2 >= mesh->vertices.size())
-                continue;
-
-            const Models::Vertex& v0 = mesh->vertices[i0];
-            const Models::Vertex& v1 = mesh->vertices[i1];
-            const Models::Vertex& v2 = mesh->vertices[i2];
-            const Vec3& p0 = positions[i0];
-            const Vec3& p1 = positions[i1];
-            const Vec3& p2 = positions[i2];
-            const Vec3& n0 = normals[i0];
-            const Vec3& n1 = normals[i1];
-            const Vec3& n2 = normals[i2];
-
             GpuTriangle triangle;
-            triangle.p0 = {p0.x, p0.y, p0.z, std::bit_cast<float>(material_index)};
-            triangle.p1 = {p1.x, p1.y, p1.z, std::bit_cast<float>(item.entity)};
-            triangle.p2 = {p2.x, p2.y, p2.z, 0.0f};
-            triangle.n0 = {n0.x, n0.y, n0.z, 0.0f};
-            triangle.n1 = {n1.x, n1.y, n1.z, 0.0f};
-            triangle.n2 = {n2.x, n2.y, n2.z, 0.0f};
-            triangle.uv01 = {v0.uv.x, v0.uv.y, v1.uv.x, v1.uv.y};
-            triangle.uv2 = {v2.uv.x, v2.uv.y, 0.0f, 0.0f};
+            if (!triangleFor(prepared, static_cast<std::uint32_t>(triangle_index), &triangle)) continue;
             triangles_.push_back(triangle);
+            triangle_sources_.push_back(TriangleSource{
+                static_cast<std::uint32_t>(item_index),
+                static_cast<std::uint32_t>(triangle_index),
+            });
         }
     }
 
     if (!triangles_.empty()) {
         if (nodes_.capacity() < triangles_.size() * 2u)
             nodes_.reserve(triangles_.size() * 2u);
-        buildNode(0u, static_cast<std::uint32_t>(triangles_.size()));
+        std::vector<std::uint32_t> order(triangles_.size());
+        for (std::size_t index = 0u; index < order.size(); ++index)
+            order[index] = static_cast<std::uint32_t>(index);
+        buildNode(0u, static_cast<std::uint32_t>(triangles_.size()), order);
+
+        std::vector<GpuTriangle> unsorted_triangles = std::move(triangles_);
+        std::vector<TriangleSource> unsorted_sources = std::move(triangle_sources_);
+        triangles_.resize(order.size());
+        triangle_sources_.resize(order.size());
+        for (std::size_t index = 0u; index < order.size(); ++index) {
+            triangles_[index] = std::move(unsorted_triangles[order[index]]);
+            triangle_sources_[index] = unsorted_sources[order[index]];
+        }
     }
+    return true;
+}
+
+bool SceneCache::updateGeometry(
+    const Ecs::World& world,
+    const std::vector<Scene::RenderItem>& items,
+    std::string *error)
+{
+    if (triangles_.size() != triangle_sources_.size()) {
+        if (error) *error = "scene geometry source mapping is inconsistent";
+        return false;
+    }
+
+    std::vector<std::uint8_t> needed(items.size(), 0u);
+    for (const TriangleSource& source : triangle_sources_) {
+        if (source.item >= items.size()) {
+            if (error) *error = "scene geometry source item is invalid";
+            return false;
+        }
+        needed[source.item] = 1u;
+    }
+
+    DeformationCache deformations;
+    std::vector<PreparedItem> prepared(items.size());
+    for (std::size_t item_index = 0u; item_index < items.size(); ++item_index) {
+        if (needed[item_index] == 0u) continue;
+        if (!prepareItem(
+                world,
+                items[item_index],
+                material_indices_,
+                deformations,
+                &prepared[item_index],
+                error))
+            return false;
+        if (!prepared[item_index].valid) {
+            if (error) *error = "scene geometry topology changed during incremental update";
+            return false;
+        }
+    }
+
+    for (std::size_t index = 0u; index < triangle_sources_.size(); ++index) {
+        const TriangleSource& source = triangle_sources_[index];
+        if (!triangleFor(prepared[source.item], source.triangle, &triangles_[index])) {
+            if (error) *error = "scene geometry triangle changed during incremental update";
+            return false;
+        }
+    }
+
+    refitNodes();
     return true;
 }
 
@@ -530,7 +782,9 @@ void SceneCache::clearGeometry()
 {
     nodes_.clear();
     triangles_.clear();
+    triangle_sources_.clear();
     geometry_initialized_ = false;
+    topology_initialized_ = false;
 }
 
 void SceneCache::clearResources()
@@ -548,6 +802,7 @@ void SceneCache::clear()
     clearResources();
     render_items_.clear();
     geometry_signature_ = std::numeric_limits<std::uint64_t>::max();
+    topology_signature_ = std::numeric_limits<std::uint64_t>::max();
     resource_signature_ = std::numeric_limits<std::uint64_t>::max();
 }
 

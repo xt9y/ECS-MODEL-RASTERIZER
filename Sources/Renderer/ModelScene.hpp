@@ -29,6 +29,7 @@ struct Instance {
     Models::ModelHandle model = Models::INVALID_MODEL;
     std::uint32_t scene = Models::INVALID_INDEX;
     std::uint32_t variant = Models::INVALID_INDEX;
+    Ecs::Entity pose_entity = Ecs::INVALID_ENTITY;
     std::vector<NodeBinding> nodes;
     std::vector<PartBinding> loose_parts;
 };

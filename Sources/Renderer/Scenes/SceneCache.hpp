@@ -102,14 +102,24 @@ public:
     const std::vector<Models::TextureHandle>& textureHandles() const { return texture_handles_; }
     const std::vector<Scene::RenderItem>& renderItems() const { return render_items_; }
     std::uint64_t geometryRevision() const { return geometry_revision_; }
+    std::uint64_t topologyRevision() const { return topology_revision_; }
     std::uint64_t resourceRevision() const { return resource_revision_; }
     std::uint64_t geometryUpdates() const { return geometry_updates_; }
+    std::uint64_t topologyUpdates() const { return topology_updates_; }
     std::uint64_t resourceUpdates() const { return resource_updates_; }
 
 private:
+    struct TriangleSource {
+        std::uint32_t item = 0u;
+        std::uint32_t triangle = 0u;
+    };
+
     bool rebuildResources(const std::vector<Scene::RenderItem>& items, std::size_t maximum_texture_slots, std::string *error);
     bool rebuildGeometry(const Ecs::World& world, const std::vector<Scene::RenderItem>& items, std::string *error);
-    std::uint32_t buildNode(std::uint32_t start, std::uint32_t count);
+    bool updateGeometry(const Ecs::World& world, const std::vector<Scene::RenderItem>& items, std::string *error);
+    std::uint64_t topologySignature(const std::vector<Scene::RenderItem>& items) const;
+    std::uint32_t buildNode(std::uint32_t start, std::uint32_t count, std::vector<std::uint32_t>& order);
+    void refitNodes();
     void clearGeometry();
     void clearResources();
 
@@ -120,18 +130,23 @@ private:
     inline static std::uint64_t config_revision_ = 1u;
     std::vector<GpuNode> nodes_;
     std::vector<GpuTriangle> triangles_;
+    std::vector<TriangleSource> triangle_sources_;
     std::vector<GpuMaterial> materials_;
     std::vector<Models::TextureHandle> texture_handles_;
     std::vector<Scene::RenderItem> render_items_;
     std::unordered_map<Models::MaterialHandle, std::uint32_t> material_indices_;
     Models::TextureHandle environment_texture_ = Models::INVALID_TEXTURE;
     std::uint64_t geometry_signature_ = std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t topology_signature_ = std::numeric_limits<std::uint64_t>::max();
     std::uint64_t resource_signature_ = std::numeric_limits<std::uint64_t>::max();
     std::uint64_t geometry_revision_ = 0u;
+    std::uint64_t topology_revision_ = 0u;
     std::uint64_t resource_revision_ = 0u;
     std::uint64_t geometry_updates_ = 0u;
+    std::uint64_t topology_updates_ = 0u;
     std::uint64_t resource_updates_ = 0u;
     bool geometry_initialized_ = false;
+    bool topology_initialized_ = false;
     bool resources_initialized_ = false;
 };
 

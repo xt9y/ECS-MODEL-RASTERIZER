@@ -53,23 +53,24 @@ bool SceneResources::init(std::string *error)
     return true;
 }
 
-bool SceneResources::replaceBuffer(
+bool SceneResources::ensureBuffer(
     SDL_GPUBuffer *&target,
+    std::size_t& capacity,
     SDL_GPUBufferUsageFlags usage,
-    const void *data,
     std::size_t bytes,
     const char *label)
 {
-    std::array<std::uint8_t, 16> zero{};
-    const std::size_t safe_bytes = std::max(bytes, zero.size());
+    const std::size_t safe_bytes = std::max<std::size_t>(bytes, 16u);
+    if (target && capacity >= safe_bytes) return true;
     SDL_GPUBuffer *replacement = Renderer::SDLGPU::createBuffer(
         usage,
         safe_bytes,
-        bytes == 0u ? zero.data() : data,
+        nullptr,
         label);
     if (!replacement) return false;
     if (target) SDL_ReleaseGPUBuffer(Renderer::SDLGPU::device(), target);
     target = replacement;
+    capacity = safe_bytes;
     return true;
 }
 
@@ -108,39 +109,64 @@ SDL_GPUTexture *SceneResources::textureFor(Models::TextureHandle handle, std::st
 
 bool SceneResources::syncBuffers(std::string *error)
 {
-    if (geometry_revision_ != scene_.geometryRevision()) {
-        if (!replaceBuffer(
-                nodes_, SceneBufferUsage,
-                scene_.nodes().data(), scene_.nodes().size() * sizeof(GpuNode),
-                "Horse BVH Nodes") ||
-            !replaceBuffer(
-                triangles_, SceneBufferUsage,
-                scene_.triangles().data(), scene_.triangles().size() * sizeof(GpuTriangle),
-                "Horse Scene Triangles"))
-        {
-            if (error) *error = "failed to upload SDL_GPU scene geometry";
-            return false;
-        }
-        geometry_revision_ = scene_.geometryRevision();
+    const bool geometry_changed = geometry_revision_ != scene_.geometryRevision();
+    const bool material_changed = material_revision_ != materials_.revision();
+    if (!geometry_changed && !material_changed) return true;
+
+    const std::size_t node_bytes = scene_.nodes().size() * sizeof(GpuNode);
+    const std::size_t triangle_bytes = scene_.triangles().size() * sizeof(GpuTriangle);
+    const std::size_t base_material_bytes = scene_.materials().size() * sizeof(GpuMaterial);
+    const std::size_t material_bytes =
+        materials_.materials().size() * sizeof(Trace::GpuAdvancedMaterial);
+
+    if (geometry_changed &&
+        (!ensureBuffer(nodes_, node_capacity_, SceneBufferUsage, node_bytes, "Horse BVH Nodes") ||
+         !ensureBuffer(
+             triangles_, triangle_capacity_, SceneBufferUsage, triangle_bytes,
+             "Horse Scene Triangles")))
+    {
+        if (error) *error = "failed to allocate SDL_GPU scene geometry buffers";
+        return false;
+    }
+    if (material_changed &&
+        (!ensureBuffer(
+             base_materials_, base_material_capacity_, SceneBufferUsage, base_material_bytes,
+             "Horse Base Materials") ||
+         !ensureBuffer(
+             materials_buffer_, material_capacity_, SceneBufferUsage, material_bytes,
+             "Horse Scene Materials")))
+    {
+        if (error) *error = "failed to allocate SDL_GPU scene material buffers";
+        return false;
     }
 
-    if (material_revision_ != materials_.revision()) {
-        if (!replaceBuffer(
-                base_materials_, SceneBufferUsage,
-                scene_.materials().data(),
-                scene_.materials().size() * sizeof(GpuMaterial),
-                "Horse Base Materials") ||
-            !replaceBuffer(
-                materials_buffer_, SceneBufferUsage,
-                materials_.materials().data(),
-                materials_.materials().size() * sizeof(Trace::GpuAdvancedMaterial),
-                "Horse Scene Materials"))
-        {
-            if (error) *error = "failed to upload SDL_GPU scene materials";
-            return false;
-        }
-        material_revision_ = materials_.revision();
+    SDL_GPUCommandBuffer *command = SDL_AcquireGPUCommandBuffer(Renderer::SDLGPU::device());
+    if (!command) {
+        if (error) *error = "failed to acquire SDL_GPU scene upload command buffer";
+        return false;
     }
+
+    const bool uploaded =
+        (!geometry_changed ||
+            ((node_bytes == 0u || Renderer::SDLGPU::uploadBuffer(
+                command, nodes_, scene_.nodes().data(), node_bytes, true)) &&
+             (triangle_bytes == 0u || Renderer::SDLGPU::uploadBuffer(
+                command, triangles_, scene_.triangles().data(), triangle_bytes, true)))) &&
+        (!material_changed ||
+            ((base_material_bytes == 0u || Renderer::SDLGPU::uploadBuffer(
+                command, base_materials_, scene_.materials().data(), base_material_bytes, true)) &&
+             (material_bytes == 0u || Renderer::SDLGPU::uploadBuffer(
+                command, materials_buffer_, materials_.materials().data(), material_bytes, true))));
+
+    const bool submitted = uploaded && SDL_SubmitGPUCommandBuffer(command);
+    if (!submitted) {
+        SDL_CancelGPUCommandBuffer(command);
+        if (error) *error = "failed to upload SDL_GPU scene buffers";
+        return false;
+    }
+
+    if (geometry_changed) geometry_revision_ = scene_.geometryRevision();
+    if (material_changed) material_revision_ = materials_.revision();
     return true;
 }
 
@@ -248,6 +274,10 @@ void SceneResources::clear()
     base_materials_ = nullptr;
     triangles_ = nullptr;
     nodes_ = nullptr;
+    material_capacity_ = 0u;
+    base_material_capacity_ = 0u;
+    triangle_capacity_ = 0u;
+    node_capacity_ = 0u;
     texture_bindings_.fill({});
     scene_.clear();
     materials_.clear();

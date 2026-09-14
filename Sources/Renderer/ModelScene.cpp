@@ -2,6 +2,7 @@
 
 #include "Camera/Camera.hpp"
 #include "Renderer/Components.hpp"
+#include "Renderer/DynamicGeometry.hpp"
 #include "Renderer/Math.hpp"
 #include "Renderer/ModelScenePointers.hpp"
 
@@ -118,12 +119,20 @@ bool dynamicPart(Models::ModelHandle model, std::size_t part_index)
     return node && node->skin != Models::INVALID_INDEX;
 }
 
+bool dynamicModel(Models::ModelHandle model)
+{
+    for (std::size_t part_index = 0u; part_index < Models::partCount(model); ++part_index)
+        if (dynamicPart(model, part_index)) return true;
+    return false;
+}
+
 bool addPart(
     Ecs::World& world,
     Models::ModelHandle model,
     std::size_t part_index,
     std::uint32_t variant,
     Ecs::Entity parent,
+    Ecs::Entity pose_entity,
     bool visible,
     const Models::InstanceData *instances,
     PartBinding *binding,
@@ -136,8 +145,7 @@ bool addPart(
     if (!mesh) return fail(error, "model scene part references invalid mesh");
 
     const bool is_dynamic = dynamicPart(model, part_index);
-    const Models::MeshHandle mesh_handle = is_dynamic ? Models::registerMesh(*mesh) : source->mesh;
-    if (mesh_handle == Models::INVALID_MESH) return fail(error, "failed to allocate model scene mesh");
+    const Models::MeshHandle mesh_handle = source->mesh;
 
     const Ecs::Entity entity = world.createEntity();
     world.add<Transform>(entity, Transform{});
@@ -148,6 +156,15 @@ bool addPart(
     });
     world.add<RenderableComponent>(entity, RenderableComponent{visible});
     if (instances) world.add<InstanceComponent>(entity, InstanceComponent{localInstanceMatrices(*instances)});
+    if (is_dynamic) {
+        if (pose_entity == Ecs::INVALID_ENTITY)
+            return fail(error, "model scene dynamic part has no pose state");
+        world.add<ModelDeformComponent>(entity, ModelDeformComponent{
+            model,
+            static_cast<std::uint32_t>(part_index),
+            pose_entity,
+        });
+    }
 
     binding->part = static_cast<std::uint32_t>(part_index);
     binding->entity = entity;
@@ -182,28 +199,6 @@ LightType lightType(Models::AssetLightType type)
         case Models::AssetLightType::Point:
         default: return LightType::Point;
     }
-}
-
-bool updatePartMesh(
-    Models::ModelHandle model,
-    const Models::Runtime::Pose& pose,
-    const PartBinding& binding,
-    std::string *error)
-{
-    if (!binding.dynamic_mesh) return true;
-    const Models::ModelPart *part = Models::part(model, binding.part);
-    if (!part) return fail(error, "model scene dynamic part is invalid");
-    const Models::MeshData *source = Models::mesh(part->mesh);
-    if (!source) return fail(error, "model scene dynamic source mesh is invalid");
-
-    Models::Runtime::DeformedPart deformed;
-    if (!Models::Runtime::deformPart(model, binding.part, pose, &deformed, error)) return false;
-    Models::MeshData replacement = *source;
-    replacement.vertices = std::move(deformed.vertices);
-    replacement.bounds = deformed.bounds;
-    if (!Models::updateMesh(binding.mesh, replacement))
-        return fail(error, "failed to update model scene dynamic mesh");
-    return true;
 }
 
 } // namespace
@@ -244,6 +239,10 @@ bool instantiate(
     result.scene = scene_index;
     result.variant = options.variant;
     result.nodes.resize(Models::nodeCount(model));
+    if (dynamicModel(model)) {
+        result.pose_entity = world.createEntity();
+        world.add<ModelPoseComponent>(result.pose_entity, ModelPoseComponent{pose, 1u});
+    }
 
     bool activated_camera = false;
     for (std::size_t node_index = 0u; node_index < Models::nodeCount(model); ++node_index) {
@@ -317,6 +316,7 @@ bool instantiate(
                     part_index,
                     options.variant,
                     binding.entity,
+                    result.pose_entity,
                     pose.nodes[node_index].visible,
                     instances,
                     &part_binding,
@@ -333,7 +333,17 @@ bool instantiate(
             const Models::ModelPart *part = Models::part(model, part_index);
             if (!part || part->node != Models::INVALID_INDEX) continue;
             PartBinding binding;
-            if (!addPart(world, model, part_index, options.variant, Ecs::INVALID_ENTITY, true, nullptr, &binding, error)) {
+            if (!addPart(
+                    world,
+                    model,
+                    part_index,
+                    options.variant,
+                    Ecs::INVALID_ENTITY,
+                    result.pose_entity,
+                    true,
+                    nullptr,
+                    &binding,
+                    error)) {
                 destroy(world, result);
                 return false;
             }
@@ -358,7 +368,14 @@ bool applyPose(
         return fail(error, "pose does not belong to model scene instance");
     if (pose.nodes.size() < instance.nodes.size()) return fail(error, "model pose node count is too small");
 
-    bool resources_changed = false;
+    if (instance.pose_entity != Ecs::INVALID_ENTITY) {
+        ModelPoseComponent *state = world.get<ModelPoseComponent>(instance.pose_entity);
+        if (!state) return fail(error, "model scene lost its pose state");
+        state->pose = pose;
+        ++state->revision;
+        if (state->revision == 0u) state->revision = 1u;
+    }
+
     for (NodeBinding& binding : instance.nodes) {
         if (binding.entity == Ecs::INVALID_ENTITY || binding.node >= pose.nodes.size()) continue;
         Transform *transform = world.get<Transform>(binding.entity);
@@ -371,21 +388,13 @@ bool applyPose(
         for (PartBinding& part : binding.parts) {
             if (RenderableComponent *renderable = world.get<RenderableComponent>(part.entity))
                 renderable->visible = pose.nodes[binding.node].visible;
-            if (!updatePartMesh(instance.model, pose, part, error)) return false;
-            resources_changed = resources_changed || part.dynamic_mesh;
         }
-    }
-
-    for (PartBinding& part : instance.loose_parts) {
-        if (!updatePartMesh(instance.model, pose, part, error)) return false;
-        resources_changed = resources_changed || part.dynamic_mesh;
     }
 
     if (!Pointers::apply(world, instance, pose, error)) return false;
 
     world.markChanged(Ecs::ChangeKind::Transform);
     world.markChanged(Ecs::ChangeKind::Animation);
-    if (resources_changed) world.markChanged(Ecs::ChangeKind::Resource);
     return true;
 }
 
@@ -427,6 +436,8 @@ void destroy(Ecs::World& world, Instance& instance)
     }
     for (NodeBinding& node : instance.nodes)
         if (node.entity != Ecs::INVALID_ENTITY && world.alive(node.entity)) world.destroyEntity(node.entity);
+    if (instance.pose_entity != Ecs::INVALID_ENTITY && world.alive(instance.pose_entity))
+        world.destroyEntity(instance.pose_entity);
     instance = {};
 }
 

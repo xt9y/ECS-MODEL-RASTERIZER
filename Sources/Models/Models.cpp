@@ -1,5 +1,6 @@
 #include "Models/Models.hpp"
 
+#include "Models/Core/MeshRevision.hpp"
 #include "Models/Core/Texture.hpp"
 #include "Models/Formats/Registry.hpp"
 
@@ -32,17 +33,32 @@ struct Model {
     std::unordered_map<std::string, std::string> extensions_json;
 };
 
+struct MeshRevision {
+    std::uint64_t geometry = 0u;
+    std::uint64_t topology = 0u;
+};
+
 std::vector<Model>& models() { static std::vector<Model> values; return values; }
 std::vector<MeshData>& meshes() { static std::vector<MeshData> values; return values; }
+std::vector<MeshRevision>& meshRevisions() { static std::vector<MeshRevision> values; return values; }
 std::vector<MaterialData>& materials() { static std::vector<MaterialData> values; return values; }
 std::unordered_map<std::string, ModelHandle>& cache() { static std::unordered_map<std::string, ModelHandle> values; return values; }
 std::uint64_t& resourceRevisionStorage() { static std::uint64_t value = 1u; return value; }
+std::uint64_t& meshRevisionStorage() { static std::uint64_t value = 1u; return value; }
 
 void touchResources()
 {
     std::uint64_t& value = resourceRevisionStorage();
     ++value;
     if (value == 0u) value = 1u;
+}
+
+std::uint64_t nextMeshRevision()
+{
+    std::uint64_t& revision = meshRevisionStorage();
+    ++revision;
+    if (revision == 0u) revision = 1u;
+    return revision;
 }
 
 std::string normalizedPath(const std::string& path)
@@ -160,6 +176,8 @@ MeshHandle registerMesh(MeshData mesh)
     if (meshes().size() >= static_cast<std::size_t>(INVALID_MESH)) return INVALID_MESH;
     const MeshHandle handle = static_cast<MeshHandle>(meshes().size());
     meshes().push_back(std::move(mesh));
+    const std::uint64_t revision = nextMeshRevision();
+    meshRevisions().push_back({revision, revision});
     touchResources();
     return handle;
 }
@@ -186,10 +204,28 @@ const MeshData *mesh(MeshHandle handle)
 
 bool updateMesh(MeshHandle handle, const MeshData& replacement)
 {
-    if (handle >= meshes().size()) return false;
+    if (handle >= meshes().size() || handle >= meshRevisions().size()) return false;
+    const MeshData& current = meshes()[handle];
+    const bool topology_changed =
+        current.vertices.size() != replacement.vertices.size() ||
+        current.indices != replacement.indices;
     meshes()[handle] = replacement;
+    MeshRevision& revision = meshRevisions()[handle];
+    const std::uint64_t next_revision = nextMeshRevision();
+    revision.geometry = next_revision;
+    if (topology_changed) revision.topology = next_revision;
     touchResources();
     return true;
+}
+
+std::uint64_t Internal::meshRevision(MeshHandle handle)
+{
+    return handle < meshRevisions().size() ? meshRevisions()[handle].geometry : 0u;
+}
+
+std::uint64_t Internal::meshTopologyRevision(MeshHandle handle)
+{
+    return handle < meshRevisions().size() ? meshRevisions()[handle].topology : 0u;
 }
 
 const MaterialData *material(MaterialHandle handle)
@@ -386,6 +422,7 @@ void clearCache()
     cache().clear();
     models().clear();
     meshes().clear();
+    meshRevisions().clear();
     materials().clear();
     clearTextureCache();
     Animation::clearAssets();
