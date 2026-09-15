@@ -239,6 +239,7 @@ std::size_t partCount(ModelHandle model);
 
 std::size_t nodeCount(ModelHandle model);
 const NodeData *node(ModelHandle model, std::size_t index);
+std::size_t nodeIndex(ModelHandle model, std::string_view name);
 std::size_t sceneCount(ModelHandle model);
 const SceneData *scene(ModelHandle model, std::size_t index);
 std::uint32_t defaultScene(ModelHandle model);
@@ -250,6 +251,7 @@ std::size_t lightCount(ModelHandle model);
 const LightData *light(ModelHandle model, std::size_t index);
 std::size_t modelAnimationCount(ModelHandle model);
 const ModelAnimationData *modelAnimation(ModelHandle model, std::size_t index);
+std::size_t modelAnimationIndex(ModelHandle model, std::string_view name);
 std::size_t variantCount(ModelHandle model);
 const MaterialVariantData *variant(ModelHandle model, std::size_t index);
 std::size_t variantMappingCount(ModelHandle model);

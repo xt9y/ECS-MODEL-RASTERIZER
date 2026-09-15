@@ -259,6 +259,15 @@ const NodeData *node(ModelHandle handle, std::size_t index)
     return model && index < model->nodes.size() ? &model->nodes[index] : nullptr;
 }
 
+std::size_t nodeIndex(ModelHandle handle, std::string_view name)
+{
+    const Model *model = modelFor(handle);
+    if (!model) return INVALID_INDEX;
+    for (std::size_t index = 0u; index < model->nodes.size(); ++index)
+        if (model->nodes[index].name == name) return index;
+    return INVALID_INDEX;
+}
+
 std::size_t sceneCount(ModelHandle handle)
 {
     const Model *model = modelFor(handle);
@@ -323,6 +332,15 @@ const ModelAnimationData *modelAnimation(ModelHandle handle, std::size_t index)
 {
     const Model *model = modelFor(handle);
     return model && index < model->model_animations.size() ? &model->model_animations[index] : nullptr;
+}
+
+std::size_t modelAnimationIndex(ModelHandle handle, std::string_view name)
+{
+    const Model *model = modelFor(handle);
+    if (!model) return INVALID_INDEX;
+    for (std::size_t index = 0u; index < model->model_animations.size(); ++index)
+        if (model->model_animations[index].name == name) return index;
+    return INVALID_INDEX;
 }
 
 std::size_t variantCount(ModelHandle handle)

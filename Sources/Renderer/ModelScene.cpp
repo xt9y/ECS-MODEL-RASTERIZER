@@ -201,6 +201,48 @@ LightType lightType(Models::AssetLightType type)
     }
 }
 
+bool align(
+    Ecs::World& world,
+    Instance& instance,
+    const Models::Runtime::Pose& pose,
+    std::uint32_t target_basis,
+    const Models::Mat4& source_basis,
+    std::string *error)
+{
+    if (target_basis >= pose.nodes.size()) return fail(error, "model animation target basis is invalid");
+
+    Math::Mat4 inverse_basis {};
+    if (!Math::inverseMatrix(pose.nodes[target_basis].world, &inverse_basis))
+        return fail(error, "model animation target basis is not invertible");
+    const Math::Mat4 correction = Math::multiply(source_basis, inverse_basis);
+
+    for (NodeBinding& binding : instance.nodes) {
+        if (binding.entity == Ecs::INVALID_ENTITY || binding.node >= pose.nodes.size()) continue;
+        const Models::NodeData *source = Models::node(instance.model, binding.node);
+        if (!source) return fail(error, "model animation target node is unavailable");
+
+        bool root = source->parent < 0;
+        if (!root) {
+            const std::size_t parent = static_cast<std::size_t>(source->parent);
+            root = parent >= instance.nodes.size() || instance.nodes[parent].entity == Ecs::INVALID_ENTITY;
+        }
+        if (!root) continue;
+
+        Transform *transform = world.get<Transform>(binding.entity);
+        if (!transform) return fail(error, "model animation target root lost its transform component");
+        transform->matrix_override = Math::multiply(correction, pose.nodes[binding.node].local);
+        transform->matrix_override_enabled = true;
+        transform->position = {
+            transform->matrix_override[12],
+            transform->matrix_override[13],
+            transform->matrix_override[14],
+        };
+    }
+
+    world.markChanged(Ecs::ChangeKind::Transform);
+    return true;
+}
+
 } // namespace
 
 bool instantiate(
@@ -301,10 +343,16 @@ bool instantiate(
         NodeBinding& binding = result.nodes[node_index];
         const Models::NodeData *source = Models::node(model, node_index);
         if (!source || binding.entity == Ecs::INVALID_ENTITY) continue;
+        bool parented = false;
         if (source->parent >= 0 && static_cast<std::size_t>(source->parent) < result.nodes.size()) {
             const Ecs::Entity parent = result.nodes[static_cast<std::size_t>(source->parent)].entity;
-            if (parent != Ecs::INVALID_ENTITY) world.add<Parent>(binding.entity, Parent{parent});
+            if (parent != Ecs::INVALID_ENTITY) {
+                world.add<Parent>(binding.entity, Parent{parent});
+                parented = true;
+            }
         }
+        if (!parented && options.parent != Ecs::INVALID_ENTITY)
+            world.add<Parent>(binding.entity, Parent{options.parent});
 
         const Models::InstanceData *instances = instancesForNode(model, static_cast<std::uint32_t>(node_index));
         binding.parts.reserve(source->parts.size());
@@ -338,7 +386,7 @@ bool instantiate(
                     model,
                     part_index,
                     options.variant,
-                    Ecs::INVALID_ENTITY,
+                    options.parent,
                     result.pose_entity,
                     true,
                     nullptr,
@@ -424,6 +472,162 @@ bool setVariant(
     instance.variant = variant;
     world.markChanged(Ecs::ChangeKind::Resource);
     return true;
+}
+
+std::size_t bind(
+    Animation& animation,
+    Instance& instance,
+    const Models::Runtime::RetargetOptions& options)
+{
+    if (instance.model == Models::INVALID_MODEL || animation.targets.size() >= Models::INVALID_INDEX)
+        return Models::INVALID_INDEX;
+    const std::size_t index = animation.targets.size();
+    animation.targets.push_back(AnimationTarget{
+        .instance = &instance,
+        .options = options,
+    });
+    return index;
+}
+
+bool attach(
+    Animation& animation,
+    std::size_t target,
+    std::string_view source_node,
+    std::string_view target_node)
+{
+    if (target >= animation.targets.size() || source_node.empty() || target_node.empty()) return false;
+    for (const AnimationAttachment& attachment : animation.attachments)
+        if (attachment.target == target) return false;
+    animation.attachments.push_back(AnimationAttachment{
+        .target = target,
+        .source_node = std::string(source_node),
+        .target_node = std::string(target_node),
+    });
+    return true;
+}
+
+bool play(
+    Animation& animation,
+    Models::ModelHandle model,
+    std::size_t clip,
+    bool loop,
+    std::string *error)
+{
+    if (error) error->clear();
+    if (model == Models::INVALID_MODEL || !Models::modelAnimation(model, clip))
+        return fail(error, "invalid model scene animation clip");
+
+    std::vector<Models::Runtime::Retarget> bindings(animation.targets.size());
+    for (std::size_t index = 0u; index < animation.targets.size(); ++index) {
+        AnimationTarget& target = animation.targets[index];
+        if (!target.instance || target.instance->model == Models::INVALID_MODEL)
+            return fail(error, "model scene animation target is invalid");
+        if (!Models::Runtime::bindRetarget(
+                model,
+                target.instance->model,
+                &bindings[index],
+                target.options,
+                error)) return false;
+    }
+
+    std::vector<std::uint32_t> attachment_sources(animation.attachments.size(), Models::INVALID_INDEX);
+    std::vector<std::uint32_t> attachment_targets(animation.attachments.size(), Models::INVALID_INDEX);
+    for (std::size_t index = 0u; index < animation.attachments.size(); ++index) {
+        const AnimationAttachment& attachment = animation.attachments[index];
+        if (attachment.target >= animation.targets.size())
+            return fail(error, "model scene animation attachment target is invalid");
+        const AnimationTarget& target = animation.targets[attachment.target];
+        if (!target.instance) return fail(error, "model scene animation attachment lost its target");
+
+        const std::size_t source = Models::nodeIndex(model, attachment.source_node);
+        const std::size_t target_basis = Models::nodeIndex(target.instance->model, attachment.target_node);
+        if (source == Models::INVALID_INDEX)
+            return fail(error, "model scene animation source attachment was not found: " + attachment.source_node);
+        if (target_basis == Models::INVALID_INDEX)
+            return fail(error, "model scene animation target attachment was not found: " + attachment.target_node);
+        attachment_sources[index] = static_cast<std::uint32_t>(source);
+        attachment_targets[index] = static_cast<std::uint32_t>(target_basis);
+    }
+
+    for (std::size_t index = 0u; index < animation.targets.size(); ++index)
+        animation.targets[index].binding = std::move(bindings[index]);
+    for (std::size_t index = 0u; index < animation.attachments.size(); ++index) {
+        animation.attachments[index].source = attachment_sources[index];
+        animation.attachments[index].target_basis = attachment_targets[index];
+    }
+
+    animation.model = model;
+    animation.clip = static_cast<std::uint32_t>(clip);
+    animation.time = 0.0f;
+    animation.loop = loop;
+    animation.active = true;
+    return true;
+}
+
+bool update(
+    Ecs::World& world,
+    Animation& animation,
+    float delta_seconds,
+    std::string *error)
+{
+    if (error) error->clear();
+    if (!animation.active) return true;
+
+    const Models::ModelAnimationData *clip = Models::modelAnimation(animation.model, animation.clip);
+    if (!clip) return fail(error, "model scene animation clip is unavailable");
+
+    animation.time += std::max(delta_seconds, 0.0f);
+    bool finished = false;
+    if (clip->duration > 0.0f) {
+        if (animation.loop) {
+            animation.time = std::fmod(animation.time, clip->duration);
+        } else if (animation.time >= clip->duration) {
+            animation.time = clip->duration;
+            finished = true;
+        }
+    } else if (!animation.loop) {
+        animation.time = 0.0f;
+        finished = true;
+    }
+
+    Models::Runtime::Pose source;
+    if (!Models::Runtime::sample(
+            animation.model,
+            animation.clip,
+            animation.time,
+            animation.loop,
+            &source,
+            error)) return false;
+
+    for (AnimationTarget& target : animation.targets) {
+        if (!target.instance || target.instance->model == Models::INVALID_MODEL)
+            return fail(error, "model scene animation target is unavailable");
+        if (!Models::Runtime::retarget(target.binding, source, &target.pose, error)) return false;
+        if (!applyPose(world, *target.instance, target.pose, error)) return false;
+    }
+
+    for (const AnimationAttachment& attachment : animation.attachments) {
+        if (attachment.target >= animation.targets.size() || attachment.source >= source.nodes.size())
+            return fail(error, "model scene animation attachment is unavailable");
+        AnimationTarget& target = animation.targets[attachment.target];
+        if (!target.instance || attachment.target_basis >= target.pose.nodes.size())
+            return fail(error, "model scene animation attachment target is unavailable");
+        if (!align(
+                world,
+                *target.instance,
+                target.pose,
+                attachment.target_basis,
+                source.nodes[attachment.source].world,
+                error)) return false;
+    }
+
+    if (finished) animation.active = false;
+    return true;
+}
+
+bool playing(const Animation& animation)
+{
+    return animation.active;
 }
 
 void destroy(Ecs::World& world, Instance& instance)

@@ -473,6 +473,149 @@ bool sample(
     return buildWorld(model, pose, error);
 }
 
+bool bindRetarget(
+    ModelHandle source,
+    ModelHandle target,
+    Retarget *binding,
+    const RetargetOptions& options,
+    std::string *error)
+{
+    if (error) error->clear();
+    if (!binding || source == INVALID_MODEL || target == INVALID_MODEL)
+        return fail(error, "invalid model retarget binding");
+
+    Retarget result;
+    result.source = source;
+    result.target = target;
+    result.options = options;
+    if (!reset(source, &result.source_bind, error)) return false;
+
+    if (!options.source_root.empty()) {
+        const std::size_t source_root = nodeIndex(source, options.source_root);
+        if (source_root == INVALID_INDEX)
+            return fail(error, "retarget source root was not found: " + options.source_root);
+        result.source_root = static_cast<std::uint32_t>(source_root);
+
+        if (!options.target_root.empty()) {
+            const std::size_t target_root = nodeIndex(target, options.target_root);
+            if (target_root == INVALID_INDEX)
+                return fail(error, "retarget target root was not found: " + options.target_root);
+            result.target_root = static_cast<std::uint32_t>(target_root);
+        } else {
+            for (std::size_t index = 0u; index < nodeCount(target); ++index) {
+                const NodeData *candidate = node(target, index);
+                if (candidate && candidate->parent < 0) {
+                    result.target_root = static_cast<std::uint32_t>(index);
+                    break;
+                }
+            }
+            if (result.target_root == INVALID_INDEX)
+                return fail(error, "retarget target has no root node");
+        }
+    } else if (!options.target_root.empty()) {
+        return fail(error, "retarget target root requires a source root");
+    }
+
+    result.source_nodes.assign(nodeCount(target), INVALID_INDEX);
+    for (std::size_t target_index = 0u; target_index < result.source_nodes.size(); ++target_index) {
+        const NodeData *target_node = node(target, target_index);
+        if (!target_node || target_node->name.empty()) continue;
+        const std::size_t source_index = nodeIndex(source, target_node->name);
+        if (source_index != INVALID_INDEX)
+            result.source_nodes[target_index] = static_cast<std::uint32_t>(source_index);
+    }
+
+    *binding = std::move(result);
+    return true;
+}
+
+bool retarget(
+    const Retarget& binding,
+    const Pose& source,
+    Pose *target,
+    std::string *error)
+{
+    if (error) error->clear();
+    if (!target || binding.source == INVALID_MODEL || binding.target == INVALID_MODEL)
+        return fail(error, "invalid model retarget operation");
+    if (source.model != binding.source)
+        return fail(error, "retarget source pose does not belong to binding source model");
+    if (source.nodes.size() < nodeCount(binding.source))
+        return fail(error, "retarget source pose node count is too small");
+    if (binding.source_bind.model != binding.source ||
+        binding.source_bind.nodes.size() < nodeCount(binding.source))
+        return fail(error, "retarget source bind pose is invalid");
+    if (binding.source_nodes.size() != nodeCount(binding.target))
+        return fail(error, "retarget node map does not match target model");
+    if (!reset(binding.target, target, error)) return false;
+
+    const auto sourceFor = [&](std::size_t target_index) -> std::uint32_t {
+        if (binding.source_root != INVALID_INDEX && target_index == binding.target_root)
+            return binding.source_root;
+        return target_index < binding.source_nodes.size()
+            ? binding.source_nodes[target_index]
+            : INVALID_INDEX;
+    };
+
+    if (binding.options.mode == RetargetMode::LocalDelta) {
+        for (std::size_t target_index = 0u; target_index < target->nodes.size(); ++target_index) {
+            const std::uint32_t source_index = sourceFor(target_index);
+            if (source_index == INVALID_INDEX || source_index >= source.nodes.size() ||
+                source_index >= binding.source_bind.nodes.size()) continue;
+
+            Mat4 inverse_bind {};
+            if (!inverse(binding.source_bind.nodes[source_index].local, &inverse_bind))
+                return fail(error, "retarget source bind pose is not invertible");
+            const Mat4 delta = multiply(source.nodes[source_index].local, inverse_bind);
+            target->nodes[target_index].local = multiply(delta, target->nodes[target_index].local);
+        }
+        return buildWorld(binding.target, target, error);
+    }
+
+    std::vector<std::uint8_t> state(target->nodes.size(), 0u);
+    const auto applyWorld = [&](auto&& self, std::size_t target_index) -> bool {
+        if (target_index >= target->nodes.size()) return false;
+        if (state[target_index] == 2u) return true;
+        if (state[target_index] == 1u) return fail(error, "retarget target hierarchy contains a cycle");
+        state[target_index] = 1u;
+
+        const NodeData *target_node = node(binding.target, target_index);
+        if (!target_node) return fail(error, "retarget target node is unavailable");
+
+        std::size_t parent = INVALID_INDEX;
+        if (target_node->parent >= 0) {
+            parent = static_cast<std::size_t>(target_node->parent);
+            if (parent >= target->nodes.size()) return fail(error, "retarget target node parent is invalid");
+            if (!self(self, parent)) return false;
+        }
+
+        const std::uint32_t source_index = sourceFor(target_index);
+        if (source_index != INVALID_INDEX && source_index < source.nodes.size()) {
+            const Mat4& desired_world = source.nodes[source_index].world;
+            if (parent != INVALID_INDEX) {
+                Mat4 inverse_parent {};
+                if (!inverse(target->nodes[parent].world, &inverse_parent))
+                    return fail(error, "retarget target parent transform is not invertible");
+                target->nodes[target_index].local = multiply(inverse_parent, desired_world);
+            } else {
+                target->nodes[target_index].local = desired_world;
+            }
+            target->nodes[target_index].world = desired_world;
+        } else {
+            target->nodes[target_index].world = parent != INVALID_INDEX
+                ? multiply(target->nodes[parent].world, target->nodes[target_index].local)
+                : target->nodes[target_index].local;
+        }
+
+        state[target_index] = 2u;
+        return true;
+    };
+
+    for (std::size_t target_index = 0u; target_index < target->nodes.size(); ++target_index)
+        if (!applyWorld(applyWorld, target_index)) return false;
+    return true;
+}
+
 bool deformPart(
     ModelHandle model,
     std::size_t part_index,

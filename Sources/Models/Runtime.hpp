@@ -31,6 +31,27 @@ struct Pose {
     std::unordered_map<std::string, std::vector<float>> pointer_values;
 };
 
+enum class RetargetMode : std::uint8_t {
+    LocalDelta,
+    World,
+};
+
+struct RetargetOptions {
+    RetargetMode mode = RetargetMode::LocalDelta;
+    std::string source_root;
+    std::string target_root;
+};
+
+struct Retarget {
+    ModelHandle source = INVALID_MODEL;
+    ModelHandle target = INVALID_MODEL;
+    RetargetOptions options;
+    Pose source_bind;
+    std::vector<std::uint32_t> source_nodes;
+    std::uint32_t source_root = INVALID_INDEX;
+    std::uint32_t target_root = INVALID_INDEX;
+};
+
 struct DeformedPart {
     PrimitiveMode primitive_mode = PrimitiveMode::Triangles;
     std::vector<Vertex> vertices;
@@ -48,6 +69,21 @@ bool sample(
     float time_seconds,
     bool loop,
     Pose *pose,
+    std::string *error = nullptr
+);
+
+bool bindRetarget(
+    ModelHandle source,
+    ModelHandle target,
+    Retarget *binding,
+    const RetargetOptions& options = {},
+    std::string *error = nullptr
+);
+
+bool retarget(
+    const Retarget& binding,
+    const Pose& source,
+    Pose *target,
     std::string *error = nullptr
 );
 
