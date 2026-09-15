@@ -6,6 +6,7 @@ namespace UI {
 bool init();
 void shutdown();
 bool beginFrame();
+void showOverlay();
 bool initialized();
 bool wantsMouse();
 bool wantsKeyboard();

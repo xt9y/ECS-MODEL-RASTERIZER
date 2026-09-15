@@ -16,6 +16,7 @@ namespace {
 bool ready = false;
 bool frame_active = false;
 bool frame_visible = false;
+bool frame_interactive = false;
 
 } // namespace
 
@@ -67,6 +68,7 @@ void shutdown()
     ImGui::DestroyContext();
     Renderer::SDLGPU::release();
 
+    frame_interactive = false;
     frame_visible = false;
     ready = false;
 }
@@ -84,8 +86,14 @@ bool beginFrame()
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     frame_active = true;
-    frame_visible = !Input::pointer().captured;
-    return frame_visible;
+    frame_interactive = !Input::pointer().captured;
+    frame_visible = frame_interactive;
+    return frame_interactive;
+}
+
+void showOverlay()
+{
+    if (ready && frame_active) frame_visible = true;
 }
 
 bool initialized()
@@ -95,12 +103,12 @@ bool initialized()
 
 bool wantsMouse()
 {
-    return ready && frame_visible && ImGui::GetIO().WantCaptureMouse;
+    return ready && frame_interactive && ImGui::GetIO().WantCaptureMouse;
 }
 
 bool wantsKeyboard()
 {
-    return ready && frame_visible && ImGui::GetIO().WantCaptureKeyboard;
+    return ready && frame_interactive && ImGui::GetIO().WantCaptureKeyboard;
 }
 
 namespace RenderPass {
@@ -112,6 +120,7 @@ void render(Renderer::Internal::FrameOutput& output)
     const bool visible = frame_visible;
     ImGui::Render();
     frame_active = false;
+    frame_interactive = false;
     frame_visible = false;
 
     if (!visible || output.api != Renderer::Internal::GraphicsApi::SDLGPU) return;
